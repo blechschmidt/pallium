@@ -1,0 +1,38 @@
+name: Pallium Tests
+on: [push, workflow_dispatch]
+jobs:
+  Run-Pallium-Tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '>=1.18.0'
+      - name: Set up Python and Go
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Display environment info
+        run: id && go version
+      - name: Install dependencies
+        run: |
+          sudo ./install.sh --noconfirm --dependencies-only --test-dependencies
+          sudo apt-get -y install python3-seccomp openvpn tor nftables dnsmasq isc-dhcp-client socat
+          sudo systemctl disable dnsmasq.service
+          sudo pip install python-digitalocean
+      - name: Install pallium
+        run: sudo pip install -vvvv .
+      - name: Prepare environment
+        env:
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: mkdir -p ~/.ssh && echo "$SSH_KEY" >> ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && sudo systemctl stop systemd-resolved && sudo bash -c 'rm /etc/resolv.conf; echo "nameserver 1.1.1.1" > /etc/resolv.conf' && sudo iptables -P FORWARD ACCEPT && sudo ip6tables -P FORWARD ACCEPT
+      #- name: Setup upterm session
+      #  uses: lhotari/action-upterm@v1
+      - name: Run sandbox tests
+        timeout-minutes: 30
+        run: cd tests && python test_sandbox.py -v
+      - name: Run API tests
+        timeout-minutes: 30
+        env:
+          DIGITALOCEAN_API_KEY: ${{ secrets.DIGITALOCEAN_API_KEY }}
+        run: cd tests && sudo -E python test_api.py -v

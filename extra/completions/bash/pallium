@@ -1,0 +1,20 @@
+_pallium()
+{
+    local cur prev words cword
+    _init_completion || return
+    WORDS=""
+    if [ "${#COMP_WORDS[@]}" == "2" ]; then
+        WORDS="run exec shell"
+    fi
+    if [ "${#COMP_WORDS[@]}" == "3" ]; then
+        if [ "${FUNCNAME[-1]}" == "_sudo" ]; then
+            PROFILE_DIR="/etc/pallium/profiles/"
+        else
+            PROFILE_DIR=~"/.pallium/profiles/"
+        fi
+        WORDS="$(ls $(eval echo "$PROFILE_DIR"*.json) 2>/dev/null | sed -E "s/(^.*\/)(.*)\.json$/\2/")"
+    fi
+    COMPREPLY=( $(compgen -W "$WORDS" -- "$cur") )
+}
+
+complete -F _pallium pallium

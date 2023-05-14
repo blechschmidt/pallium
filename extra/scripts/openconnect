@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# This is an example script for openconnect.
+# A profile making use of this script could look as follows:
+#
+# {
+#     "chain": [{
+#        "type": "script",
+#        "path": "/etc/pallium/scripts/openconnect",
+#
+#        "destination": "server.example.com",
+#        "username": "john.doe",
+#        "foo": "bar"
+#     }]
+# }
+#
+# Items are passed as uppercase environment variables prefixed by `PALLIUM_SCRIPT_`.
+# For example, `$PALLIUM_SCRIPT_FOO` would equal "bar" in the script.
+
+
+# Start `openconnect`. The `-b` flag will cause it to be forked to the background
+# as soon as the password has been read from stdin.
+# Script execution is blocking. Therefore, in case of blocking commands which
+# do not support daemonizing, a subshell could be launched in the background
+# using the control operator `&`.
+openconnect "$PALLIUM_SCRIPT_DESTINATION" -u "$PALLIUM_SCRIPT_USERNAME" -b
