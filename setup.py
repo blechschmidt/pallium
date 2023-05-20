@@ -44,7 +44,7 @@ class PalliumEggInfo(egg_info):
 
 
 setuptools.setup(
-    name='pallium',
+    name='pallium-sandbox',
     version='0.1.0dev',
     author='B. Blechschmidt',
     author_email='git@blechschmidt.io',
