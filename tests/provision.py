@@ -1,8 +1,8 @@
 """To test pallium, we set up real machines that are reachable by the public.
 This is necessary if we want to test chains with hops that are reachable through Tor.
 However, this also requires resources, such as public IP addresses, which cannot be immediately obtained locally.
-Therefore, we leverage the ability to establish multiple connections via PPoE (and PPoE passthrough).
-This needs to be supported by the ISP and is therefore not portable at all."""
+To this end, a DigitalOcean server is provisioned. The CI pipeline relies on this method."""
+
 import ipaddress
 import os.path
 import re
@@ -290,36 +290,4 @@ class VagrantProvisioner:
             machine.ssh(['cat', '>>', '~/.ssh/authorized_keys'], check_output=True, input=f.read(), user='vagrant')
         machine.ssh(['sudo', 'mkdir', '/root/.ssh/'], user='vagrant')
         machine.ssh(['sudo', 'cp', '/home/vagrant/.ssh/authorized_keys', '/root/.ssh/authorized_keys'], user='vagrant')
-        return machine
-
-
-class VagrantPpoeProvisioner:
-    @staticmethod
-    def provision() -> VagrantMachine:
-        machine = VagrantProvisioner.provision('Vagrantfile.ppoe.template')
-
-        script_dir = os.path.split(os.path.realpath(__file__))[0]
-
-        # Set up pppoe
-        machine.ssh(['pacman', '-Syuu', '--noconfirm'])
-        machine.ssh(['pacman', '-S', 'ppp', 'rp-pppoe', '--noconfirm'])
-        ppp_provider = os.path.join(script_dir, 'templates', 'provider')
-        shutil.copyfile(ppp_provider, os.path.join(machine.vagrantfile_dir, 'provider'))
-        chap_secrets = os.path.join(script_dir, 'templates', 'chap-secrets')
-        shutil.copyfile(chap_secrets, os.path.join(machine.vagrantfile_dir, 'chap-secrets'))
-        machine.ssh(['mv', '/vagrant/provider', '/etc/ppp/peers/provider'])
-        machine.ssh(['mv', '/vagrant/chap-secrets', '/etc/ppp/chap-secrets'])
-        machine.ssh(['chown', 'root:root', '/etc/ppp/chap-secrets'])
-        machine.ssh(['chmod', '600', '/etc/ppp/chap-secrets'])
-
-        # For some reason, the machine needs to be restarted
-        machine.process_call(['vagrant', 'reload'], cwd=machine.vagrantfile_dir, preexec_fn=drop_privileges)
-        time.sleep(5)
-        machine.ssh(['pon'])
-        time.sleep(5)
-        machine.ssh(['ip', 'route', 'add', '0.0.0.0/1', 'dev', 'ppp0'])
-        machine.ssh(['ip', 'route', 'add', '128.0.0.0/1', 'dev', 'ppp0'])
-        machine.ssh(['ip', 'route', 'add', '0000::/1', 'dev', 'ppp0'])
-        machine.ssh(['ip', 'route', 'add', '8000::/1', 'dev', 'ppp0'])
-
         return machine
