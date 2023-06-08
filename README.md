@@ -1,11 +1,11 @@
 # Pallium
 
-## Linux Networking and Security Sandbox
+## Linux Network and Security Sandbox
 
 **This project is still in an early phase of development (pre-alpha). It is not ready for production use
 and has [known issues](/doc/issues.md), which are not (yet) documented exhaustively. Please expect bugs and breaking changes.**
 
-Pallium is a Linux networking and security sandbox. In contrast to many other sandboxing solutions,
+Pallium is a Linux network and security sandbox. In contrast to many other sandboxing solutions,
 pallium can provide reasonable protection against Linux kernel exploits
 through the use of [gVisor](https://github.com/google/gvisor).
 Pallium also supports restricting file system access and implements virtual users, allowing to isolate applications

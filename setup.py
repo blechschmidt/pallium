@@ -48,7 +48,7 @@ setuptools.setup(
     version='0.1.0dev',
     author='B. Blechschmidt',
     author_email='git@blechschmidt.io',
-    description='Linux Networking and Security Sandbox',
+    description='Linux Network and Security Sandbox',
     long_description=long_description,
     long_description_content_type='text/markdown',
     url='https://github.com/blechschmidt/pallium',
