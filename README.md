@@ -3,7 +3,8 @@
 ## Linux Network and Security Sandbox
 
 **This project is still in an early phase of development (pre-alpha). It is not ready for production use
-and has [known issues](/doc/issues.md), which are not (yet) documented exhaustively. Please expect bugs and breaking changes.**
+and has [known issues](/doc/issues.md), which are not (yet) documented exhaustively.
+Please expect bugs and breaking changes.**
 
 Pallium is a Linux network and security sandbox. In contrast to many other sandboxing solutions,
 pallium can provide reasonable protection against Linux kernel exploits
@@ -182,8 +183,8 @@ Having installed pallium, it supports a range of commands:
 ### run
 
 Assuming unprivileged mode, `pallium run my_profile` sets up the namespaces according to the configuration and executes
-the command defined in the `run` object in the configuration file at `~/.config/pallium/profiles/my_profile.json` inside the
-application namespace. In case no `run` property is specified, pallium will run the default shell as defined by the
+the command defined in the `run` object in the configuration file at `~/.config/pallium/profiles/my_profile.json` inside
+the application namespace. In case no `run` property is specified, pallium will run the default shell as defined by the
 `$SHELL` environment variable. The namespaces will live as long as the command executed by `run` is running. We refer
 to one running set of namespaces as a session.
 
