@@ -734,7 +734,7 @@ def nft_has_rule(nft, table, chain, rule):
     return False
 
 
-def nft_has_jump_rule(nft, table, chain, target):
+def nft_get_jump_rule_handle(nft, table, chain, target):
     expected = [{
         'NFTA_EXPR_NAME': 'immediate',
         'NFTA_EXPR_DATA': {
@@ -754,7 +754,7 @@ def nft_has_jump_rule(nft, table, chain, target):
         if attrs['NFTA_RULE_TABLE'] == table and attrs['NFTA_RULE_CHAIN'] == chain \
                 and util.nla_attrs2dict(attrs['NFTA_RULE_EXPRESSIONS']) == expected:
             return attrs['NFTA_RULE_HANDLE']
-    return False
+    return None
 
 
 def delete_chain(chain):
@@ -840,6 +840,14 @@ class OwnedSession(Session):
         ip.link('set', index=lo, state='up')
 
     def _enable_ip_forwarding(self, version=None, allow_interfaces=None, forward_policy=nftables.NF_DROP):
+        """
+        Enable IP forwarding globally.
+
+        @param version: The IP version which to enable forwarding for.
+        @param allow_interfaces: The interfaces which to allow forwarding for,
+        @param forward_policy: The default policy of the nft forward chain.
+        @return: None.
+        """
         if allow_interfaces is None:
             allow_interfaces = []
         if version is None:
@@ -863,7 +871,7 @@ class OwnedSession(Session):
             @self._revert
             def revert():
                 with NFTables(nfgen_family=nftables.family_from_version(version)) as nft2:
-                    jump_handle = nft_has_jump_rule(nft2, table, 'pallium', custom_chain)
+                    jump_handle = nft_get_jump_rule_handle(nft2, table, 'pallium', custom_chain)
                     if isinstance(jump_handle, int):
                         nft2.rule('del', table=table, chain='pallium', handle=jump_handle, flags=0)
                     nft2.chain('del', table=table, name=custom_chain, flags=0)
@@ -878,7 +886,8 @@ class OwnedSession(Session):
                 nftables.jump(custom_chain),
             ))
 
-            if not isinstance(nft_has_jump_rule(nft, table, chain, 'pallium'), int):
+            jump_rule_handle = nft_get_jump_rule_handle(nft, table, chain, 'pallium')
+            if not isinstance(jump_rule_handle, int):
                 nft.rule('add', table=table, chain=chain, expressions=(
                     nftables.jump('pallium'),
                 ))
