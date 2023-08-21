@@ -16,3 +16,4 @@ htmlcov/
 .vagrant
 *.bak
 .env
+/pallium/gvisor-init/gvisor-init
