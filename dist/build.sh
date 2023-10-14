@@ -173,8 +173,8 @@ test "$INSTALL" = "1" && {
   set +e
   DEBIAN_FRONTEND=noninteractive apt -y install g++-multilib
   set -e
-  wget -c https://www.python.org/ftp/python/3.10.0/Python-3.10.0.tar.xz
-  tar -Jxf Python-3.10.0.tar.xz
+  wget -c https://www.python.org/ftp/python/3.10.13/Python-3.10.13.tar.xz
+  tar -Jxf Python-3.10.13.tar.xz
   wget -c https://www.openssl.org/source/openssl-1.1.1o.tar.gz
   tar -xf openssl-1.1.1o.tar.gz
   cd openssl-1.1.1o || exit 1
@@ -196,11 +196,11 @@ test "$INSTALL" = "1" && {
   make -j 32
   make install_sw
   cd ..
-  cd Python-3.10.0/ || exit 1
+  cd Python-3.10.13/ || exit 1
   ./configure --enable-optimizations --with-openssl=/usr/local/custom-openssl --with-openssl-rpath=auto --enable-shared
   make -j 32 install
   cd ..
-  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/pallium/dist/Python-3.10.0
+  export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/pallium/dist/Python-3.10.13
   update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.10 1
   python3 -m pip install pyinstaller
   python3 -m pip install ..
