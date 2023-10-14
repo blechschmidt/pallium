@@ -4,13 +4,19 @@
 #
 # --dist sets up a Docker container for building the project with an old glibc for increased compatibility.
 # --install is not to be used manually. It is an entry point for the Docker container only.
+# --multiarch uses vagrant, spins up a Ubuntu VM for building pallium for multiple architectures.
+# --novirt is to be used with --multiarch. If it is set, building takes place locally instead of inside a VM.
+# --bundle causes dependencies like Tor, gvisor, gvisor_init and slirp4netns/slirpnetstack to be bundled with pallium.
 #
 # Without additional arguments, the script will simply use pyinstaller to build the project, assuming that all
 # requirements are met.
 
+# Stop execution upon error.
 set -e
+# Output commands as they are executed.
+set -x
 
-OPTS=$(getopt -o '' --long install,dist,multiarch,novirt -- "$@")
+OPTS=$(getopt -o '' --long install,dist,multiarch,novirt,bundle -- "$@")
 
 eval set -- "$OPTS"
 
@@ -20,10 +26,66 @@ while true; do
     --dist) DIST=1; shift;;
     --multiarch) MULTIARCH=1; shift;;
     --novirt) NOVIRT=1; shift;;
+    --bundle) BUNDLE=1; shift;;
     --) shift; break;;
     *) echo "Error."; exit 1;;
   esac
 done
+
+download_file() {
+  # This breaks if the arguments contain quotes
+  SRC="$1"
+  DST="$2"
+  if command -v wget >/dev/null 2>&1; then
+    wget -O- "$SRC" > "$DST"
+  elif command -v curl >/dev/null 2>&1; then
+    curl "$SRC" > "$DST"
+  else
+    echo "curl or wget are required. Aborting."
+    exit 1
+  fi
+}
+
+download_gvisor() {
+  ARCH=$(uname -m)
+  URL=https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}
+  download_file "$URL/runsc" runsc
+}
+
+build_gvisor_init() {
+  (
+    cd ../pallium/gvisor-init
+    make
+    mv gvisor-init ../../dist
+  )
+}
+
+install_go() {
+  (
+    wget "https://go.dev/dl/go1.21.2.linux-amd64.tar.gz"
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.2.linux-amd64.tar.gz
+  )
+  export PATH=$PATH:/usr/local/go/bin
+}
+
+build_slirpnetstack() {
+  (
+    git clone https://github.com/blechschmidt/slirpnetstack slirpnetstack-repo
+    cd slirpnetstack-repo
+    go build
+  )
+  mv slirpnetstack-repo/slirpnetstack .
+}
+
+build_tun2socks() {
+  (
+    # TODO: Use Jason Lyu's repo as soon as virtual DNS is implemented
+    git clone https://github.com/blechschmidt/tun2socks tun2socks-repo
+    cd tun2socks-repo
+    go build
+  )
+  mv tun2socks-repo/tun2socks .
+}
 
 SCRIPT_DIR=$(dirname "$0")
 cd "$SCRIPT_DIR"
@@ -100,14 +162,14 @@ test "$DIST" = "1" && {
   require_root
   cd ..
   docker build -f dist/Dockerfile -t pallium_build .
-  docker run --rm -v "$(pwd)/"dist/bin:/pallium/dist/bin -ti pallium_build
+  docker run --rm -v "$(pwd)/"dist/bin:/pallium/dist/bin -e "BUNDLE=$BUNDLE" -t pallium_build
   exit 0
 }
 
 test "$INSTALL" = "1" && {
   require_root
   DEBIAN_FRONTEND=noninteractive apt update
-  DEBIAN_FRONTEND=noninteractive apt -y install wget build-essential libreadline-dev libncursesw5-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev zlib1g-dev file
+  DEBIAN_FRONTEND=noninteractive apt -y install wget build-essential libreadline-dev libncursesw5-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev zlib1g-dev file pcregrep git curl
   set +e
   DEBIAN_FRONTEND=noninteractive apt -y install g++-multilib
   set -e
@@ -142,6 +204,38 @@ test "$INSTALL" = "1" && {
   update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.10 1
   python3 -m pip install pyinstaller
   python3 -m pip install ..
+
+  test "$BUNDLE" = "1" && {
+    ARCH=$(uname -m)
+    test "$ARCH" != "x86_64" && {
+      printf "The --bundle argument is currently only supported on x86_64\n" 1>&2
+      exit 1
+    }
+
+    # Bundle Tor
+    TOR_URL=$(curl -L "https://www.torproject.org/en/download/tor/" | pcregrep -o1 '"(https://archive.torproject.org/tor-package-archive/torbrowser/[^"]+)' | grep '.tar.gz$' | grep linux | grep x86_64 | head -n1)
+    download_file "$TOR_URL" "tor-bundle.tar.gz"
+    tar -xf tor-bundle.tar.gz
+    mv tor tor-lib
+    mv tor-lib/tor tor
+
+    # Bundle gvisor's runsc
+    download_gvisor
+
+    # Bundle gvisor-init
+    build_gvisor_init
+
+    # Bundle slirpnetstack
+    # Build requirement
+    install_go
+    build_slirpnetstack
+
+    build_tun2socks
+  }
 }
 
-pyinstaller --clean -F -n pallium-"$(uname -m)" --distpath bin bootstrap.py
+if test "$BUNDLE" = "1"; then
+  pyinstaller --clean -F -n pallium-"$(uname -m)" --distpath bin --add-binary tun2socks:bin --add-binary tor:bin --add-binary runsc:bin --add-binary gvisor-init:bin --add-binary slirpnetstack:bin --add-data tor-lib:tor-lib --add-data ../extra/licensing:licensing bootstrap.py
+else
+  pyinstaller --clean -F -n pallium-"$(uname -m)" --distpath bin bootstrap.py
+fi

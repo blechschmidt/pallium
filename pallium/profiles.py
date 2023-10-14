@@ -12,6 +12,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import traceback
 from typing import List, Union, Optional, Callable
 
@@ -1001,7 +1002,7 @@ class OwnedSession(Session):
                 return
 
         if runtime.use_slirp4netns() and is_first_hop:
-            slirp_app = slirp.Slirp4Netns(hop_info, self.profile.quiet)
+            slirp_app = slirp.available_slirp_class()(hop_info, self.profile.quiet)
 
             hop_info.netns.run(slirp_app.prepare)
 

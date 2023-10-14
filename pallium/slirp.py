@@ -1,11 +1,12 @@
 import os
+import shutil
 import signal
 import subprocess
 import traceback
 
 from pyroute2.iproute import IPRoute
 
-from . import sysutil
+from . import sysutil, util
 from . import netns
 
 
@@ -30,6 +31,19 @@ class Slirp:
         raise NotImplementedError()
 
 
+def available_slirp_class():
+    """
+
+
+    @return: A class (not instance!) for the instantiation of a concrete slirp implementation.
+    """
+    if shutil.which(util.get_tool_path('slirpnetstack')):
+        return SlirpNetstack
+    if shutil.which(util.get_tool_path('slirp4netns')):
+        return Slirp4Netns
+    raise FileNotFoundError("Failed to find slirpnetstack or slirp4netns")
+
+
 class Slirp4Netns(Slirp):
     def start(self):
         hop_info = self.hop_info
@@ -40,15 +54,15 @@ class Slirp4Netns(Slirp):
                 'stderr': subprocess.DEVNULL,
             }
         read_fd, write_fd = os.pipe()
-        p = subprocess.Popen(['slirp4netns', '-6',
-                              '--disable-host-loopback',
-                              '-c', str(hop_info.netns.pid),
-                              '-r', str(write_fd),
-                              hop_info.indev],
-                             pass_fds=[write_fd],
-                             start_new_session=True,
-                             preexec_fn=lambda: sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGKILL),
-                             **kwargs)
+        p = util.popen([util.get_tool_path('slirp4netns'), '-6',
+                        '--disable-host-loopback',
+                        '-c', str(hop_info.netns.pid),
+                        '-r', str(write_fd),
+                        hop_info.indev],
+                       pass_fds=[write_fd],
+                       start_new_session=True,
+                       preexec_fn=lambda: sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGKILL),
+                       **kwargs)
         os.read(read_fd, 1)
 
         def terminate():
@@ -98,17 +112,17 @@ class SlirpNetstack(Slirp):
         local_fwd = []
         for fwd in self.port_forwardings:
             local_fwd.extend(['-L', str(fwd)])
-        p = subprocess.Popen(['slirpnetstack',
-                              '--interface', hop_info.indev,
-                              '--netns', '/proc/%d/ns/net' % hop_info.netns.pid,
-                              '--allow', 'tcp://0.0.0.0/0:0-65535',
-                              '--allow', 'udp://0.0.0.0/0:0-65535',
-                              '--allow', 'tcp://[::]/0:0-65535',
-                              '--allow', 'udp://[::]/0:0-65535'] + local_fwd,
-                             pass_fds=[],
-                             start_new_session=True,
-                             preexec_fn=preexec_fn,
-                             **kwargs)
+        p = util.popen([util.get_tool_path('slirpnetstack'),
+                        '--interface', hop_info.indev,
+                        '--netns', '/proc/%d/ns/net' % hop_info.netns.pid,
+                        '--allow', 'tcp://0.0.0.0/0:0-65535',
+                        '--allow', 'udp://0.0.0.0/0:0-65535',
+                        '--allow', 'tcp://[::]/0:0-65535',
+                        '--allow', 'udp://[::]/0:0-65535'] + local_fwd,
+                       pass_fds=[],
+                       start_new_session=True,
+                       preexec_fn=preexec_fn,
+                       **kwargs)
 
         # TODO: Implement FD write like in slirp4netns.
         import time

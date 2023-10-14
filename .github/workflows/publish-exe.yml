@@ -1,0 +1,27 @@
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+name: Build and publish executable
+
+permissions:
+  contents: write
+
+jobs:
+  build_publish:
+    name: Bundle x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build bundle
+        run: cd dist && sudo ./build.sh --dist --bundle
+      - name: Publish bundle
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Automated build of ${{ github.ref }}
+          files: dist/bin/*
+          draft: true
+          prerelease: true
+          body: This is an automated build of commit ${{ github.ref }}.

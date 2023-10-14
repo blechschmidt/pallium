@@ -477,10 +477,36 @@ def environ(env=os.environ):
         # This happens when LD_LIBRARY_PATH was not set.
         # Remove the env var as a last resort:
         env.pop(lp_key, None)
+    if 'PYINSTALLER_LD_LIBRARY_PATH' in env:
+        env['LD_LIBRARY_PATH'] = env['PYINSTALLER_LD_LIBRARY_PATH']
     return env
 
 
-def tool_path(args):
+def bundled_resource_path(relative_path):
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+
+def get_tool_execution_info(name):
+    bundled_path = bundled_resource_path('bin/%s' % name)
+    if os.path.isfile(bundled_path):
+        return bundled_path, {
+            'PYINSTALLER_LD_LIBRARY_PATH': bundled_resource_path('%s-lib' % name)
+        }
+    if config is None or 'paths' not in config:
+        return name, None
+    return config['paths'].get(name, name), None
+
+
+def get_tool_path(name):
+    return get_tool_execution_info(name)[0]
+
+
+def tool_popen(name):
+    pass
+
+
+def tool_path_args(args):
     if config is None or 'paths' not in config:
         return
     if len(args) > 0 and isinstance(args[0], list):
@@ -490,14 +516,14 @@ def tool_path(args):
 def proc_call(*args, **kwargs):
     kwargs.setdefault('env', os.environ)
     kwargs['env'] = environ(kwargs['env'])
-    tool_path(args)
+    tool_path_args(args)
     return subprocess.call(*args, **kwargs)
 
 
 def popen(*args, **kwargs):
     kwargs.setdefault('env', os.environ)
     kwargs['env'] = environ(kwargs['env'])
-    tool_path(args)
+    tool_path_args(args)
     return subprocess.Popen(*args, **kwargs)
 
 

@@ -26,3 +26,12 @@ def capture(iface):
     """
     create_dir()
     util.popen(['tcpdump', '-i', iface, '-U', '-w', filename(iface + '.pcap')])
+
+
+def debuginfo():
+    """
+    Print information for debugging pallium.
+
+    @return: None
+    """
+    pass

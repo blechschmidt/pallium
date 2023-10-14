@@ -11,7 +11,9 @@ import shutil
 import signal
 import stat
 import sys
+import glob
 
+from . import util
 from . import runtime
 from . import sysutil, security
 from .exceptions import *
@@ -67,7 +69,11 @@ def pallium_run(args):
         profile.quiet = True
     session = profile.run(args.new_session)
 
-    session.run(profile.command, terminal=get_tty() is not None, call_args=dict(shell=isinstance(profile.command, str)))
+    call_args = dict(
+        shell=isinstance(profile.command, str),
+        stdin=sys.stdin
+    )
+    session.run(profile.command, terminal=get_tty() is not None, call_args=call_args)
 
     global no_interrupt
     no_interrupt = True
@@ -161,12 +167,16 @@ def pallium_exec(args):
         print('Command required.', file=sys.stderr)
         sys.exit(1)
 
+    tty = None
+
     if 'config' not in args or args.config is None or args.config == '-':
+        logging.debug("Reading profile from stdin")
         data = json.loads(sys.stdin.read())
 
         # Reconnect stdin to parent terminal
-        tty = get_tty()
+        tty = get_tty(False)
         if tty is not None:
+            logging.debug("Reconnect stdin to parent terminal")
             sys.stdin = open(tty)
 
         profile = Profile.from_config(data)
@@ -184,7 +194,7 @@ def pallium_exec(args):
     max_id = (len(session.network_namespaces) - 1)
     if args.namespace > max_id:
         raise NetnsNotFoundError('The network namespace index cannot be greater than %d.' % max_id)
-    sys.exit(session.run(command, terminal=get_tty() is not None, ns_index=args.namespace, root=args.root))
+    sys.exit(session.run(command, terminal=tty is not None, ns_index=args.namespace, root=args.root, call_args={'stdin': sys.stdin}))
 
 
 def parser_add_config(parser, add=True):
@@ -220,6 +230,24 @@ def clean_exit(_, __):
 def stdin_is_pipe():
     s = os.stat(sys.stdin.fileno())
     return stat.S_IFIFO & s.st_mode != 0
+
+
+def pallium_debug(args):
+    if args.pyshell:
+        import code
+        code.interact(local={
+            '__file__': __file__
+        })
+
+
+def pallium_licenses(_):
+    for filepath in glob.glob(util.bundled_resource_path('licensing/*.txt')):
+        with open(filepath) as f:
+            print('=== BEGIN ' + os.path.basename(filepath) + ' ===')
+            print()
+            print(f.read())
+            print()
+            print('=== END ' + os.path.basename(filepath) + ' ===')
 
 
 def main(args=None):
@@ -270,6 +298,11 @@ def main(args=None):
     parser_add_session(parser_mv)
 
     main_cmd_parser.add_parser('list', help='List profiles.')
+
+    debug_parser = main_cmd_parser.add_parser('debug', help='Debug pallium. Functionality for pallium developers.')
+    debug_parser.add_argument('--pyshell', help='Start a Python shell in the pallium context.', action='store_true')
+
+    main_cmd_parser.add_parser('licenses', help='Show software licenses.')
 
     args = parser.parse_args(args)
 

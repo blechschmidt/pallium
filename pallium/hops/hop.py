@@ -147,7 +147,11 @@ class Hop:
         return util.proc_call(*args, **kwargs)
 
     def get_tool_path(self, name):
-        return self.args.get(name + '_path', name)
+        return self.args.get(name + '_path', util.get_tool_execution_info(name)[0])
+
+    @staticmethod
+    def get_tool_env(name):
+        return util.get_tool_execution_info(name)[1]
 
     def register_process(self, p):
         self.started_pids.add(p)

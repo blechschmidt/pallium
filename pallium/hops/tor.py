@@ -95,9 +95,15 @@ class TorHop(hop.Hop):
             command += ['--AutomapHostsOnResolve', '1', '--VirtualAddrNetworkIPv4', network]
         command += self._tor_args
         command += ['--Log', 'notice stderr']
-        kwargs = {}
+        kwargs = {'env': os.environ.copy()}
+
         if security.is_sudo_or_root():
             kwargs = sysutil.privilege_drop_preexec(self._user)
+
+        tor_env = self.get_tool_env('tor')
+        if tor_env:
+            kwargs['env'].update(tor_env)
+
         self.popen(command, **kwargs)
 
         self.log_info('Waiting for Tor control socket to be created')
