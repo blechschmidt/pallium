@@ -385,6 +385,9 @@ def build_mounts(paths, tmpdir=None):
 
 
 def gvisor_init_path():
+    gvisor_init_exe = shutil.which(util.get_tool_path('gvisor-init'))
+    if gvisor_init_exe is not None:
+        return gvisor_init_exe
     return os.path.join(os.path.dirname(__file__), 'gvisor-init', 'gvisor-init')
 
 
@@ -643,7 +646,7 @@ class Sandbox:
                 env=profile.sandbox.env))
             if use_gvisor:
                 argv_orig = argv
-                runsc_path = shutil.which('runsc')
+                runsc_path = shutil.which(util.get_tool_path('runsc'))
                 if runsc_path is None:
                     raise DependencyNotFoundException('Unable to find the runsc binary. Gvisor needs to be installed.')
 
@@ -733,7 +736,7 @@ class Sandbox:
 
                 if not execute:
                     argv = [
-                        'runsc',
+                        runsc_path,
                         '--ignore-cgroups',
                         '--network=host',
                         # '--debug', '--debug-log', '/tmp/gvisor-debug.txt',
@@ -750,7 +753,7 @@ class Sandbox:
                     ]
                 else:
                     argv = [
-                        'runsc',
+                        runsc_path,
                         '--root=' + gvisor_config_dir,
                         'exec',
                         '--exec-fd', '%d' % gvisor_init_fd,
