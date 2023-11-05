@@ -73,6 +73,7 @@ def pallium_run(args):
         shell=isinstance(profile.command, str),
         stdin=sys.stdin
     )
+
     session.run(profile.command, terminal=get_tty() is not None, call_args=call_args)
 
     global no_interrupt
@@ -167,13 +168,12 @@ def pallium_exec(args):
         print('Command required.', file=sys.stderr)
         sys.exit(1)
 
-    tty = None
-
     if 'config' not in args or args.config is None or args.config == '-':
         logging.debug("Reading profile from stdin")
         data = json.loads(sys.stdin.read())
 
         # Reconnect stdin to parent terminal
+        # If stdout or stderr are ttys, one of them will be used for stdin
         tty = get_tty(False)
         if tty is not None:
             logging.debug("Reconnect stdin to parent terminal")
@@ -194,7 +194,13 @@ def pallium_exec(args):
     max_id = (len(session.network_namespaces) - 1)
     if args.namespace > max_id:
         raise NetnsNotFoundError('The network namespace index cannot be greater than %d.' % max_id)
-    sys.exit(session.run(command, terminal=tty is not None, ns_index=args.namespace, root=args.root, call_args={'stdin': sys.stdin}))
+
+    call_args = dict(
+        shell=isinstance(profile.command, str),
+        stdin=sys.stdin
+    )
+    sys.exit(session.run(command, terminal=get_tty() is not None, ns_index=args.namespace, root=args.root,
+                         call_args=call_args))
 
 
 def parser_add_config(parser, add=True):
