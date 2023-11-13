@@ -13,6 +13,7 @@ import traceback
 from tempfile import mkdtemp
 
 import digitalocean
+import dotenv
 
 import pallium.sysutil as sysutil
 from pallium import security
@@ -20,6 +21,10 @@ from pallium import security
 
 class Machine:
     quiet = True
+
+    def __init__(self, ips, user='root'):
+        self.ips = list(map(ipaddress.ip_address, ips))
+        self.user = user
 
     def process_call(self, *args, **kwargs):
         if self.quiet:
@@ -29,7 +34,7 @@ class Machine:
 
     def destroy(self):
         """Stop the machine and free allocated resources."""
-        raise NotImplementedError
+        pass
 
     def __enter__(self):
         return self
@@ -38,16 +43,18 @@ class Machine:
         self.destroy()
 
     def ssh(self, command, check_output=False, **kwargs):
-        """Run an ssh command on the machine."""
-        raise NotImplementedError
+        f = subprocess.check_output if check_output else self.process_call
+        result = f(['ssh', '-o', 'StrictHostKeyChecking=no', self.get_ssh_destination(), *command],
+                   preexec_fn=drop_privileges, **kwargs)
+        return result
 
     def get_public_ips(self):
         """Get all public IP addresses of a machine."""
-        raise NotImplementedError
+        return self.ips
 
     def get_ssh_destination(self):
         """Get the destination of the machine as supplied to ssh (in the form of [user@]host)."""
-        return NotImplementedError
+        return self.user + '@' + str(self.ips[0])
 
     def install_openvpn(self):
         ip = list(filter(lambda x: x.version == 4, self.get_public_ips()))[0]
@@ -94,12 +101,6 @@ class DigitalOceanMachine(Machine):
 
     def load(self):
         self.droplet.load()
-
-    def ssh(self, command, check_output=False, **kwargs):
-        f = subprocess.check_output if check_output else self.process_call
-        result = f(['ssh', '-o', 'StrictHostKeyChecking=no', self.get_ssh_destination(), *command],
-                   preexec_fn=drop_privileges, **kwargs)
-        return result
 
     def get_ssh_destination(self):
         return 'root@%s' % self.get_public_ips()[0]
@@ -152,12 +153,10 @@ class DigitalOceanMachine(Machine):
 class DigitalOceanProvisioner:
     @staticmethod
     def provision() -> Machine:
-        token_file = os.path.join(os.path.split(os.path.realpath(__file__))[0], 'digitalocean.secret')
-        if os.path.exists(token_file):
-            with open(token_file, 'r') as f:
-                token = f.read()
-        else:
-            token = os.environ['DIGITALOCEAN_API_KEY']
+        env_file = os.path.join(os.path.dirname(__file__), '.env')
+        if os.path.exists(env_file):
+            dotenv.load_dotenv(env_file)
+        token = os.environ['DIGITALOCEAN_API_KEY']
         manager = digitalocean.Manager(token=token)
         for droplet in manager.get_all_droplets():
             if droplet.name == 'pmtest':

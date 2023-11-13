@@ -10,6 +10,7 @@ import time
 import unittest
 import warnings
 
+import dotenv
 import requests
 from pyroute2.iproute import IPRoute
 
@@ -20,7 +21,7 @@ from pallium.hops.hop import DnsTcpProxy
 from pallium.hops.tor import TorHop
 from pallium.nftables import NFTables, NFPROTO_INET
 from pallium.profiles import Profile
-from provision import DigitalOceanProvisioner
+from provision import DigitalOceanProvisioner, Machine
 
 
 class PalliumTestCase(unittest.TestCase):
@@ -41,6 +42,14 @@ class TestException(Exception):
     pass
 
 
+class TestMachine:
+    def __init__(self, ip):
+        pass
+
+    def get_public_ips(self):
+        pass
+
+
 class TestPythonInterface(PalliumTestCase):
     machines = []
     provisioner = None
@@ -49,28 +58,41 @@ class TestPythonInterface(PalliumTestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+        dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', category=ResourceWarning)
-            cls.provisioner = DigitalOceanProvisioner()
-            logging.getLogger(__name__).info('Provisioning machine ...')
-            machine = cls.provisioner.provision()
+        if os.environ.get('PALLIUM_TEST_PROVISIONER', '').lower() == 'digitalocean':
+            cls.password = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
 
-        logging.getLogger(__name__).info('Installing OpenVPN ...')
-        ovpn_config = machine.install_openvpn()
-        cls.ovpn_config_file = tempfile.mktemp()
-        with open(cls.ovpn_config_file, 'wb') as f:
-            f.write(ovpn_config)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', category=ResourceWarning)
+                cls.provisioner = DigitalOceanProvisioner()
+                logging.getLogger(__name__).info('Provisioning machine ...')
+                machine = cls.provisioner.provision()
 
-        logging.getLogger(__name__).info('Installing Dante ...')
-        machine.install_dante(cls.password)
+            logging.getLogger(__name__).info('Installing OpenVPN ...')
+            ovpn_config = machine.install_openvpn()
+            cls.ovpn_config_file = tempfile.mktemp()
+            with open(cls.ovpn_config_file, 'wb') as f:
+                f.write(ovpn_config)
 
-        logging.getLogger(__name__).info('Installing Squid ...')
-        machine.install_squid(cls.password)
+            logging.getLogger(__name__).info('Installing Dante ...')
+            machine.install_dante(cls.password)
 
-        cls.machines.append(machine)
-        logging.getLogger(__name__).info('Running tests ...')
+            logging.getLogger(__name__).info('Installing Squid ...')
+            machine.install_squid(cls.password)
+
+            cls.machines.append(machine)
+            logging.getLogger(__name__).info('Running tests ...')
+        else:
+            cls.password = os.environ.get('PALLIUM_TEST_PASSWORD')
+            ips = [os.environ.get('PALLIUM_TEST_SERVER_IPV4'), os.environ.get('PALLIUM_TEST_SERVER_IPV6')]
+            ips = [ip for ip in ips if ip is not None]
+            cls.machines = [Machine(ips)]
+
+            ovpn_config = os.environ.get('PALLIUM_TEST_OPENVPN_CERT', '').encode()
+            cls.ovpn_config_file = tempfile.mktemp()
+            with open(cls.ovpn_config_file, 'wb') as f:
+                f.write(ovpn_config)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -149,6 +171,7 @@ class TestPythonInterface(PalliumTestCase):
         """
         Connect to an IP address API using Tor and check whether the exit IP is a Tor node.
         """
+
         def check_tor():
             return requests.get('https://check.torproject.org/api/ip').json()
 

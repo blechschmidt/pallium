@@ -28,6 +28,10 @@ jobs:
         run: mkdir -p ~/.ssh && echo "$SSH_KEY" >> ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && sudo systemctl stop systemd-resolved && sudo bash -c 'rm /etc/resolv.conf; echo "nameserver 1.1.1.1" > /etc/resolv.conf' && sudo iptables -P FORWARD ACCEPT && sudo ip6tables -P FORWARD ACCEPT
       #- name: Setup upterm session
       #  uses: lhotari/action-upterm@v1
+      - name: Populate .env
+        env:
+          DOTENV: ${{ secrets.DOTENV }}
+        run: echo "$DOTENV" > tests/.env
       - name: Run sandbox tests
         timeout-minutes: 30
         run: cd tests && python test_sandbox.py -v
