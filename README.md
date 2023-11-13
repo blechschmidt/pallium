@@ -37,6 +37,13 @@ for pallium.
 
 ## Installation
 
+### Binary Download
+On x64 systems, the latest pallium release can be directly downloaded and made executable as follows:
+```shell
+curl -O -L https://github.com/blechschmidt/pallium/releases/latest/download/pallium-x86_64-bundle-linux
+chmod +x pallium-x86_64-bundle-linux
+```
+
 ### Automated Installation
 Having cloned pallium, it can be installed using the included installation script:
 
