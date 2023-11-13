@@ -19,7 +19,7 @@ jobs:
           sudo ./install.sh --noconfirm --dependencies-only --test-dependencies
           sudo apt-get -y install python3-seccomp openvpn tor nftables dnsmasq isc-dhcp-client socat
           sudo systemctl disable dnsmasq.service
-          sudo pip install python-digitalocean
+          sudo pip install python-digitalocean python-dotenv
       - name: Install pallium
         run: sudo pip install -vvvv .
       - name: Prepare environment
