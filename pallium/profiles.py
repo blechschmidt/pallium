@@ -417,18 +417,6 @@ class Profile:
         @param filepath: The full path to the configuration file.
         @return: The profile constructed according to the configuration file.
         """
-        # Prevent unauthorized users from instructing the program to execute malicious commands by modifying the
-        # configuration file.
-        try:
-            stat_result = os.stat(filepath)
-        except FileNotFoundError:
-            raise ProfileNotFoundError('The profile was not found. %s does not exist.' % filepath)
-        if not stat.S_ISREG(stat_result.st_mode):
-            raise ProfileNotFoundError('The profile was not found. %s is not a regular file.' % filepath)
-        if not util.secure_config(filepath, 0o600) and security.is_sudo_or_root():
-            raise ConfigurationError('The mode of the configuration file should be 600 (rw-------) or more restrictive '
-                                     'and it should be owned by root for security reasons.')
-
         with open(filepath, 'r') as f:
             settings = json.loads(f.read())
 

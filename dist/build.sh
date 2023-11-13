@@ -175,6 +175,8 @@ test "$INSTALL" = "1" && {
   set -e
   wget -c https://www.python.org/ftp/python/3.10.13/Python-3.10.13.tar.xz
   tar -Jxf Python-3.10.13.tar.xz
+
+  # We don't use TLS/SSL anywhere, we just need to get Python to build, which is easier with OpenSSL.
   wget -c https://www.openssl.org/source/openssl-1.1.1o.tar.gz
   tar -xf openssl-1.1.1o.tar.gz
   cd openssl-1.1.1o || exit 1

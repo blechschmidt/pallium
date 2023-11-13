@@ -5,24 +5,117 @@
 # This script will attempt to automatically detect the package manager, perform a system upgrade and install the
 # required dependencies.
 
-echo 'Pallium install script'
+# Base URL for binaries. Must not end with a slash.
+BASE_URL="https://github.com/blechschmidt/pallium/releases/latest/download"
 
-OPTS=$(getopt -o '' --long "dependencies-only,noconfirm,test-dependencies,no-dependencies" -- "$@")
+echo 'Pallium Installation Script'
+
+OPTS=$(getopt -o '' --long "dependencies-only,noconfirm,test-dependencies,no-dependencies,binary" -- "$@")
 
 eval set -- "$OPTS"
 
 CONFIRM=1
+FROM_SOURCE=1
 
 while true; do
   case "$1" in
     --dependencies-only) DEPENDENCIES_ONLY=1; shift;;
     --no-dependencies) NO_DEPENDENCIES=1; shift;;
-    --test-dependencies) TEST_DEPENDENCIES=1; shift;;  # Whether to install dependencies required for tests.
+    --test-dependencies) TEST_DEPENDENCIES=1; shift;;  # Install dependencies required for tests. Not in use yet.
     --noconfirm) CONFIRM=0; shift;;
+    --binary) FROM_SOURCE=0; shift;;  # Whether to install from source
     --) shift; break;;
     *) echo "Error."; exit 1;;
   esac
 done
+
+contains() { case "$1" in *"$2"*) true ;; *) false ;; esac }
+# shellcheck disable=SC2039
+is_root() { [ "${EUID:-$(id -u)}" -eq 0 ]; }
+
+get_goarch() {
+  # https://github.com/golang/go/blob/016d7552138077741a9c3fdadc73c0179f5d3ff7/src/cmd/dist/main.go#L94
+  OUT=$(uname -m)
+  OUT_ALL=$(uname -r)
+  export RESULT
+
+  if contains "$OUT_ALL" "RELEASE_ARM64"; then
+    RESULT="arm64"
+  elif contains "$OUT" "x86_64" || contains "$OUT" "amd64"; then
+    RESULT="amd64"
+  elif contains "$OUT" "86"; then
+    RESULT="386"
+    # Darwin case ignored
+  elif contains "$OUT" "aarch64" || contains "$OUT" "arm64"; then
+    RESULT="arm64"
+  elif contains "$OUT" "arm"; then
+    RESULT="arm"
+    # NetBSD case ignored
+  elif contains "$OUT" "ppc64le"; then
+    RESULT="ppc64le"
+  elif contains "$OUT" "ppc64"; then
+    RESULT="ppc64"
+  elif contains "$OUT" "mips64"; then
+    RESULT="mips64"
+    LE=$(python3 -c "import sys;sys.exit(int(sys.byteorder=='little'))")
+    test "$LE" = "1" && RESULT="mips64le"
+  elif contains "$OUT" "mips"; then
+    RESULT="mips"
+    LE=$(python3 -c "import sys;sys.exit(int(sys.byteorder=='little'))")
+    test "$LE" = "1" && RESULT="mipsle"
+  elif contains "$OUT" "loongarch64"; then
+    RESULT="loong64"
+  elif contains "$OUT" "riscv64"; then
+    RESULT="riscv64"
+  elif contains "$OUT" "s390x"; then
+    RESULT="s390x"
+  fi
+}
+
+download_file() {
+  # This breaks if the arguments contain quotes
+  SRC="$1"
+  DST="$2"
+  if command -v wget >/dev/null 2>&1; then
+    wget -O- "$SRC" > "$DST"
+  elif command -v curl >/dev/null 2>&1; then
+    curl "$SRC" > "$DST"
+  else
+    echo "curl or wget are required. Aborting."
+    exit 1
+  fi
+}
+
+install_binary() {
+  get_goarch
+  ARCH="$RESULT"
+  DOWNLOAD_URL="$BASE_URL/pallium-x86_64-bundle-linux"
+  DST_DIR=~/".local/share/applications"
+  is_root && {
+    DST_DIR="/usr/local/bin"
+  }
+  DST_FILENAME="pallium"
+
+  # If stdout is a terminal.
+  test -t 1 && {
+    printf "Installation directory [Default: %s]: " "$DST_DIR" >&2
+    read -r OVERRIDDEN_DST_DIR
+  }
+
+  test -z "$OVERRIDDEN_DST_DIR" || {
+    DST_DIR="$OVERRIDDEN_DST_DIR"
+  }
+
+  DST_PATH="$DST_DIR/$DST_FILENAME"
+  mkdir -p "$DST_DIR"
+  download_file "$DOWNLOAD_URL" "$DST_PATH"
+  chmod a+x "$DST_PATH"
+}
+
+test "$FROM_SOURCE" != "1" && {
+  install_binary
+  exit 0
+}
 
 test "$(id -u)" -eq 0 || {
   echo "You must be root."
@@ -153,49 +246,6 @@ install_unzip() {
   test $? -eq 0 || install_pkg unzip
 }
 
-contains() { case "$1" in *"$2"*) true ;; *) false ;; esac }
-
-get_goarch() {
-  # https://github.com/golang/go/blob/016d7552138077741a9c3fdadc73c0179f5d3ff7/src/cmd/dist/main.go#L94
-  OUT=$(uname -m)
-  OUT_ALL=$(uname -r)
-  export RESULT
-
-  if contains "$OUT_ALL" "RELEASE_ARM64"; then
-    RESULT="arm64"
-  elif contains "$OUT" "x86_64" || contains "$OUT" "amd64"; then
-    RESULT="amd64"
-  elif contains "$OUT" "86"; then
-    RESULT="386"
-    # Darwin case ignored
-  elif contains "$OUT" "aarch64" || contains "$OUT" "arm64"; then
-    RESULT="arm64"
-  elif contains "$OUT" "arm"; then
-    RESULT="arm"
-    # NetBSD case ignored
-  elif contains "$OUT" "ppc64le"; then
-    RESULT="ppc64le"
-  elif contains "$OUT" "ppc64"; then
-    RESULT="ppc64"
-  elif contains "$OUT" "mips64"; then
-    RESULT="mips64"
-    LE=$(python3 -c "import sys;sys.exit(int(sys.byteorder=='little'))")
-    test "$LE" = "1" && RESULT="mips64le"
-  elif contains "$OUT" "mips"; then
-    RESULT="mips"
-    LE=$(python3 -c "import sys;sys.exit(int(sys.byteorder=='little'))")
-    test "$LE" = "1" && RESULT="mipsle"
-  elif contains "$OUT" "loongarch64"; then
-    RESULT="loong64"
-  elif contains "$OUT" "riscv64"; then
-    RESULT="riscv64"
-  elif contains "$OUT" "s390x"; then
-    RESULT="s390x"
-  fi
-
-
-}
-
 install_curl() {
   command -v curl >/dev/null 2>&1
   test $? -eq 0 || install_pkg curl
@@ -216,9 +266,8 @@ install_tun2socks() {
 
   install_curl
 
-  VERSION=$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/xjasonlyu/tun2socks/releases/latest | cut -d / -f 8)
   TMP=$(mktemp -d)
-  URL=https://github.com/xjasonlyu/tun2socks/releases/download/"$VERSION"/tun2socks-linux-"$SUFFIX".zip
+  URL=https://github.com/xjasonlyu/tun2socks/releases/latest/download/tun2socks-linux-"$SUFFIX".zip
   ask_continue "$URL will be downloaded and extracted to /usr/local/bin/."
   curl -L "$URL" >"$TMP/tun2socks.zip"
   install_unzip

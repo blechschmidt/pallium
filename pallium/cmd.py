@@ -44,18 +44,27 @@ def profile_from_args(args):
     return profile
 
 
-def get_tty(stdin_only=True):
-    streams = [sys.stdin]
-    if not stdin_only:
-        streams += [sys.stdout, sys.stderr]
-    ttyname = None
+def is_tty(fileno):
+    try:
+        os.ttyname(fileno)
+        return True
+    except OSError as e:
+        if e.errno != errno.ENOTTY:
+            raise
+    return False
+
+
+def get_tty(exclude_stdin):
+    streams = [sys.stdout, sys.stderr]
+    if not exclude_stdin:
+        streams += [sys.stdin]
+
     for s in streams:
         try:
-            ttyname = os.ttyname(s.fileno())
+            return s.fileno()
         except OSError as e:
             if e.errno != errno.ENOTTY:
                 raise
-    return ttyname
 
 
 def wait_sigint():
@@ -74,7 +83,8 @@ def pallium_run(args):
         stdin=sys.stdin
     )
 
-    session.run(profile.command, terminal=get_tty() is not None, call_args=call_args)
+    terminal = is_tty(sys.stdin.fileno()) and is_tty(sys.stdout.fileno()) and is_tty(sys.stderr.fileno())
+    session.run(profile.command, terminal=terminal, call_args=call_args)
 
     global no_interrupt
     no_interrupt = True
@@ -168,18 +178,32 @@ def pallium_exec(args):
         print('Command required.', file=sys.stderr)
         sys.exit(1)
 
+    try:
+        config_json = json.loads(args.config)
+    except json.JSONDecodeError:
+        config_json = None
+    if not isinstance(config_json, dict):
+        config_json = None
+
     if 'config' not in args or args.config is None or args.config == '-':
         logging.debug("Reading profile from stdin")
         data = json.loads(sys.stdin.read())
 
         # Reconnect stdin to parent terminal
         # If stdout or stderr are ttys, one of them will be used for stdin
-        tty = get_tty(False)
+        tty = get_tty(True)
         if tty is not None:
             logging.debug("Reconnect stdin to parent terminal")
-            sys.stdin = open(tty)
+
+            # Open the tty at stdin FD 0
+            def opener(_, __):
+                return os.dup2(tty, 0)
+            sys.stdin = open("", opener=opener)
 
         profile = Profile.from_config(data)
+        new_session = True
+    elif config_json:
+        profile = Profile.from_config(config_json)
         new_session = True
     else:
         profile = profile_from_args(args)
@@ -199,7 +223,9 @@ def pallium_exec(args):
         shell=isinstance(profile.command, str),
         stdin=sys.stdin
     )
-    sys.exit(session.run(command, terminal=get_tty() is not None, ns_index=args.namespace, root=args.root,
+
+    terminal = is_tty(sys.stdin.fileno()) and is_tty(sys.stdout.fileno()) and is_tty(sys.stderr.fileno())
+    sys.exit(session.run(command, terminal=terminal, ns_index=args.namespace, root=args.root,
                          call_args=call_args))
 
 

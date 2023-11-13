@@ -259,9 +259,8 @@ These features are currently considered experimental.
 ## Security
 First of all, **do not set the SUID bit on pallium binaries**. Pallium is not meant to be a SUID executable.
 
-For some operations, pallium needs
-to be run as root (e.g. using `sudo`). When it is run as root, to prevent configuration files from being tampered with,
-pallium requires configuration files to be owned by root and to be inaccessible to other users.
+You are responsible for keeping secrets inside pallium configuration files safe by ensuring that only authorized users
+may read the files.
 
 Pallium will not magically anonymize your traffic. Applications and virtual machines routing their traffic through the
 configured cascade may expose sensitive information, such as installation identifiers or hardware fingerprints. In
