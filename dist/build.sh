@@ -239,5 +239,5 @@ test "$INSTALL" = "1" && {
 if test "$BUNDLE" = "1"; then
   pyinstaller --clean -F -n pallium-"$(uname -m)"-bundle-linux --distpath bin --add-binary tun2socks:bin --add-binary tor:bin --add-binary runsc:bin --add-binary gvisor-init:bin --add-binary slirpnetstack:bin --add-data tor-lib:tor-lib --add-data ../extra/licensing:licensing bootstrap.py
 else
-  pyinstaller --clean -F -n pallium-"$(uname -m)"-bundle-linux --distpath bin bootstrap.py
+  pyinstaller --clean -F -n pallium-"$(uname -m)"-linux --distpath bin bootstrap.py
 fi
