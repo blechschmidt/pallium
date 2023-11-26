@@ -1,3 +1,5 @@
+import copy
+import ipaddress
 import os
 import shutil
 import signal
@@ -8,13 +10,12 @@ from pyroute2.iproute import IPRoute
 
 from . import sysutil, util
 from . import netns
+from . import config
 
 
 class Slirp:
-    def __init__(self, hop_info, quiet=False, port_forwardings=None):
-        if port_forwardings is None:
-            port_forwardings = []
-        self.port_forwardings = port_forwardings
+    def __init__(self, configuration: config.Configuration, hop_info, quiet=False):
+        self.port_forwarding = configuration.networking.port_forwarding
         self.hop_info = hop_info
         self.quiet = quiet
 
@@ -25,7 +26,6 @@ class Slirp:
         """
         Start the slirp4netns process.
 
-        @param hop_info:
         @return: A function that is to be called to free the resources from the start operation.
         """
         raise NotImplementedError()
@@ -45,6 +45,11 @@ def available_slirp_class():
 
 
 class Slirp4Netns(Slirp):
+    def __init__(self, configuration: config.Configuration, hop_info, quiet=False):
+        if len (configuration.networking.port_forwarding.local) > 0:
+            raise NotImplementedError('Slirp4netns does not support port forwarding. Use slirpnetstack instead.')
+        super().__init__(configuration, hop_info, quiet)
+
     def start(self):
         hop_info = self.hop_info
         kwargs = {}
@@ -84,6 +89,7 @@ class SlirpNetstack(Slirp):
             ip.link('set', ifname=hop_info.indev, state='up')
             fd = ip.link_lookup(ifname=hop_info.indev)[0]
             # TODO: Do not hardcode.
+            # But this is currently a requirement documented at https://github.com/cloudflare/slirpnetstack.
             ip.addr('add', index=fd, address='10.0.2.100', prefixlen=24)
             ip.addr('add', index=fd, address='fd00::100', prefixlen=64)
             ip.route('add', index=fd, dst='0.0.0.0/0', gateway='10.0.2.2')
@@ -109,9 +115,8 @@ class SlirpNetstack(Slirp):
 
             sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGKILL)
 
-        local_fwd = []
-        for fwd in self.port_forwardings:
-            local_fwd.extend(['-L', str(fwd)])
+        local_fwd = self.port_forwardings_to_args()
+
         p = util.popen([util.get_tool_path('slirpnetstack'),
                         '--interface', hop_info.indev,
                         '--netns', '/proc/%d/ns/net' % hop_info.netns.pid,
@@ -133,3 +138,16 @@ class SlirpNetstack(Slirp):
             p.wait()
 
         return terminate
+
+    def port_forwardings_to_args(self):
+        result = []
+        if self.port_forwarding is not None:
+            for port, fwd in enumerate(self.port_forwarding.local):
+                fwd_copy = copy.deepcopy(fwd)
+
+                # IP address assigned to slirpnetstack interface. See https://github.com/cloudflare/slirpnetstack.
+                fwd_copy.guest = (ipaddress.ip_address('10.0.2.100'), port + 1)
+                assert port + 1 <= 0xffff, "Not more than 65534 local port forwardings supported"
+                result.extend(['-L', str(fwd_copy)])
+        return result
+

@@ -4,7 +4,7 @@ import shutil
 import time
 from typing import Optional, List
 
-from .hop import PortForward
+from .hop import InternalPortForwarding
 from .. import nftables, security
 from pyroute2.iproute import IPRoute
 
@@ -147,8 +147,8 @@ class TorHop(hop.Hop):
                     nftables.dnat(to=(bind_ip, 1053)),
                 ))
             fw = [
-                PortForward((nftables.ip(daddr=bind_ip), nftables.udp(dport=53), nftables.accept())),
-                PortForward((nftables.ip(saddr=bind_ip), nftables.udp(sport=53), nftables.accept()))
+                InternalPortForwarding((nftables.ip(daddr=bind_ip), nftables.udp(dport=53), nftables.accept())),
+                InternalPortForwarding((nftables.ip(saddr=bind_ip), nftables.udp(sport=53), nftables.accept()))
             ]
             self._port_forwards.extend(fw)
         return self._port_forwards
@@ -193,5 +193,5 @@ class TorHop(hop.Hop):
         return None  # Kill switching happens in the SocksHop
 
     @property
-    def port_forwards(self) -> List[PortForward]:
+    def port_forwards(self) -> List[InternalPortForwarding]:
         return self._port_forwards

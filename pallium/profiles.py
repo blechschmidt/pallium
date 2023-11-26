@@ -10,19 +10,20 @@ import os.path
 import shutil
 import signal
 import socket
-import stat
 import subprocess
-import sys
 import traceback
+import typing
 from typing import List, Union, Optional, Callable
 
 from pyroute2.iproute import IPRoute
 from pyroute2.ethtool import Ethtool
 from pyroute2.netlink.rtnl.ifaddrmsg import IFA_F_NODAD, IFA_F_NOPREFIXROUTE
 from pyroute2.netlink.exceptions import NetlinkError
+
 from .nftables import NFTables
 
 from . import audio, debugging, resolvconf, runtime
+from . import config
 from . import dhcp as dhcpd
 from . import hops
 from . import nftables
@@ -30,7 +31,6 @@ from . import onexit
 from . import security
 from . import slirp
 from . import sysutil
-from . import typeinfo
 from . import util
 from .sandbox import Sandbox
 from .graphics import enable_gui_access
@@ -67,20 +67,6 @@ class EthernetBridge:
     @classmethod
     def from_json(cls, obj):
         return cls(**obj)
-
-
-class LocalPortForwarding:
-    host: (typeinfo.IPAddress, int)
-    guest: (Optional[typeinfo.IPAddress], int)
-
-    def __init__(self):
-        pass
-
-    def __str__(self):
-        pass
-
-    def from_json(self, obj):
-        pass
 
 
 class Bridge:
@@ -144,7 +130,8 @@ class Profile:
                  kill_switch: bool = True,
                  mounts: Optional[List[MountInstruction]] = None,
                  sandbox: Sandbox = None,
-                 command: Union[List[str], str, None] = None):
+                 command: Union[List[str], str, None] = None,
+                 configuration: config.Configuration = None):
         """
         Initialize a pallium profile.
 
@@ -197,6 +184,10 @@ class Profile:
         self.sandbox = sandbox
         if sandbox is not None:
             self._mounts.extend(self.sandbox.get_mounts())
+
+        if configuration is None:
+            configuration = config.Configuration()
+        self.config = configuration
 
     # noinspection PyRedeclaration
     @property
@@ -252,6 +243,16 @@ class Profile:
         elif not security.is_sudo_or_root():
             sandbox = Sandbox()
         profile_args['sandbox'] = sandbox
+
+        # This is (partially) how the configuration should be built.
+        # TODO: Build the configuration like this for all object properties.
+        # When complete, from_config should simply call config.Configuration.from_json.
+        port_forwarding = settings.get('networking', {}).get('port_forwarding', {})
+        profile_args['configuration'] = config.Configuration(
+            networking=config.Networking(
+                port_forwarding=config.PortForwarding.from_json(port_forwarding)
+            )
+        )
 
         defaults = {}
         for k in settings:
@@ -401,6 +402,12 @@ class Profile:
                 self._postexec_fn.append(result)
 
         self.start_networks = [util.find_unused_private_network(4), util.find_unused_private_network(6)]
+
+        self.netpool.add_used([
+            ipaddress.ip_network('10.0.2.0/24'),
+            ipaddress.ip_network('fd00::/64')
+        ])  # Slirpnetstack, cf. slirp.py
+
         self.netpool.add_used(self.start_networks)
         # TODO: Deal with custom defined networks.
         self.netinfo = self.start_networks.copy()
@@ -670,9 +677,9 @@ def create_filter_chain(nft, chain_name, hook, policy=0):
     nft.chain('add', table='pallium', name=chain_name, type='filter', hook=hook, priority=0, policy=policy)
 
 
-def masquerade(iface, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
-               chain_name='POSTROUTING',
-               device=None):
+def masquerade_interface_networks(iface, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
+                                  chain_name='POSTROUTING',
+                                  device=None):
     with IPRoute() as ipr:
         ipr.addr('add', index=iface, address=str(netinfo.network_address + 1),
                  prefixlen=netinfo.prefixlen)
@@ -883,7 +890,7 @@ class OwnedSession(Session):
 
         sysutil.ip_forward(version, True)
 
-    def _filter_traffic(self, chain_prefix, hop_info):
+    def _setup_filter_rule(self, chain_prefix, hop_info):
         oifname = hop_info.previous.indev
         iifname = hop_info.outdev
 
@@ -969,6 +976,102 @@ class OwnedSession(Session):
                 nftables.accept()
             ))
 
+    # TODO: Only do this if we have a port forwarding to localhost
+    def finalize_setup(self, hop_info, is_last):
+        is_first_hop = hop_info.previous.previous is None
+        if not runtime.use_slirp4netns():
+            return
+        if is_first_hop:
+            return
+
+        local_fwds = self.profile.config.networking.port_forwarding.local
+
+        def local_port_forwarding_setup():
+            # TODO: route_localnet for last namespace (https://serverfault.com/a/1022269).
+
+            with IPRoute() as ip:
+                for netinfo in hop_info.netinfo:
+                    outdev = ip.link_lookup(ifname=hop_info.outdev)[0]
+                    indev = ip.link_lookup(ifname=hop_info.previous.indev)[0]
+                    dst = {
+                        4: '10.0.2.101/32',
+                        6: 'fd00::101/128'
+                    }
+                    ip.route('add', dst=dst[netinfo.version], oifd=outdev, gateway=str(netinfo.network_address + 2))
+
+                # We don't want to have this route in the namespace which slirp4netstack is in because
+                # the address is part of the subnet assigned to the slirp interface.
+                # 0 is the default namespace, 1 is the namespace which slirp4netstack is connected to,
+                # 2 is the following namespace. Since we run that in the previous namespace, we are at >= 3.
+                if hop_info.index > 2:
+                    for netinfo in hop_info.previous.netinfo:
+                        src = {
+                            4: '10.0.2.2/32',
+                            6: 'fd00::2/128'
+                        }
+                        ip.route('add', dst=src[netinfo.version], oifd=indev, gateway=str(netinfo.network_address + 1))
+
+            if len(local_fwds) > 0:
+                with NFTables(nfgen_family=NFPROTO_INET) as nft:
+                    nft.table('add', name='pallium')
+                    nft.chain('add', table='pallium', name='prerouting', type='nat', hook='prerouting',
+                              priority=-100, policy=nftables.NF_ACCEPT)
+
+                    for i, local_fwd in enumerate(local_fwds):
+                        # Depending on the protocol, this is either nftables.tcp or nftables.udp
+                        nft_l4: typing.Callable = getattr(nftables, local_fwd.protocol)
+                        port = i + 1
+                        nft.rule('add', table='pallium', chain='prerouting', expressions=(
+                            nftables.ip(daddr='10.0.2.100'),
+                            nft_l4(dport=port),
+                            nftables.dnat(to=('10.0.2.101', port))
+                        ))
+
+                        chain = 'pallium.' + hop_info.outdev + '.filter.forward'
+                        # Allow forwarding
+                        nft.rule('add', table='pallium', chain=chain,
+                                 expressions=(
+                                     nftables.ip(daddr='10.0.2.101'),
+                                     nft_l4(dport=port),
+                                     nftables.accept()
+                                 ))
+                        nft.rule('add', table='pallium', chain=chain,
+                                 expressions=(
+                                     nftables.ip(saddr='10.0.2.101'),
+                                     nft_l4(sport=port),
+                                     nftables.accept()
+                                 ))
+
+        hop_info.previous.netns.run(local_port_forwarding_setup)
+
+        if not is_last:
+            return
+
+        def run_in_last_ns():
+            # If we have a forwarding to an address in 127.0.0.0/8
+            if any(fwd.guest[0].is_loopback for fwd in local_fwds):
+                # This is required to perform DNAT to an address in 127.0.0.0/8
+                sysutil.sysctl('/proc/sys/net/ipv4/conf/all/route_localnet', b'1\n')
+
+            with NFTables(nfgen_family=NFPROTO_INET) as nft:
+                nft.table('add', name='pallium')
+                nft.chain('add', table='pallium', name='prerouting', type='nat', hook='prerouting',
+                          priority=-100, policy=nftables.NF_ACCEPT)
+
+                for i, local_fwd in enumerate(local_fwds):
+                    # Depending on the protocol, this is either nftables.tcp or nftables.udp
+                    nft_l4: typing.Callable = getattr(nftables, local_fwd.protocol)
+
+                    port = i + 1
+                    nft.rule('add', table='pallium', chain='prerouting', expressions=(
+                        nftables.ip(daddr='10.0.2.101'),
+                        nft_l4(dport=port),
+                        nftables.counter(),
+                        nftables.dnat(to=local_fwd.guest),
+                    ))
+
+        hop_info.netns.run(run_in_last_ns)
+
     def _setup_namespace(self, hop_info):
         is_first_hop = hop_info.previous.previous is None
         if not runtime.use_slirp4netns() or is_first_hop:
@@ -990,7 +1093,7 @@ class OwnedSession(Session):
                 return
 
         if runtime.use_slirp4netns() and is_first_hop:
-            slirp_app = slirp.available_slirp_class()(hop_info, self.profile.quiet)
+            slirp_app = slirp.available_slirp_class()(self.profile.config, hop_info, self.profile.quiet)
 
             hop_info.netns.run(slirp_app.prepare)
 
@@ -1013,10 +1116,10 @@ class OwnedSession(Session):
 
         def add_nft_rules():
             for netinfo in hop_info.netinfo:
-                masquerade(outfd, netinfo, nft_postrouting_nat_chain, hop_info.outdev)
+                masquerade_interface_networks(outfd, netinfo, nft_postrouting_nat_chain, hop_info.outdev)
 
             # if not is_first_hop and self.profile.kill_switch and hop_info.previous.hop.kill_switch_device is not None:
-            self._filter_traffic(nft_filter_prefix, hop_info)
+            self._setup_filter_rule(nft_filter_prefix, hop_info)
 
         hop_info.previous.netns.run(add_nft_rules)
 
@@ -1054,7 +1157,7 @@ class OwnedSession(Session):
         def run_in_hop_netns():
             logging.debug('Setup bridge masquerading: %s' % str(nets))
             for n in nets:
-                masquerade(outfd, n, bridge_name_in, bridge_name_in)
+                masquerade_interface_networks(outfd, n, bridge_name_in, bridge_name_in)
 
             if self._bridge.dhcp:
                 # TODO: Transform for fork support.
@@ -1235,6 +1338,7 @@ class OwnedSession(Session):
             if hop.info.previous.hop is not None and isinstance(hop_info.previous.hop.dns_servers, hops.hop.DnsOverlay):
                 # The previous hop indicates that its resolv.conf is to be exported to the next hop
                 hop_info.netns.custom_etc_path = hop_info.previous.hop.info.netns.etc_path
+
             self._setup_namespace(hop_info)
 
             if hop_info.previous.hop is not None:
@@ -1265,10 +1369,14 @@ class OwnedSession(Session):
             self._current_network = [next_network_ipv4, next_network_ipv6]
             hop_ns_count += 1
 
-            next_hop = hop.next_hop()
             hop_index += 1
+            next_hop = hop.next_hop()
             if next_hop is not None:
                 chain.insert(hop_index, next_hop)
+
+            is_last = next_hop is None and hop_index >= len(chain)
+
+            self.finalize_setup(hop_info, is_last)
 
             if hop_index == len(chain) and self._bridge is not None:
                 self._build_main_bridge(previous_hop_info, self._current_network, len(chain))

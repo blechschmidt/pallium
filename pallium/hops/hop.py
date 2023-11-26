@@ -8,7 +8,7 @@ from typing import Optional, Union, List
 
 from pyroute2.iproute import IPRoute
 
-from .. import resolvconf, security, runtime
+from .. import resolvconf, security, runtime, typeinfo
 from .. import sysutil
 from .. import util
 from ..netns import NetworkNamespace
@@ -80,7 +80,7 @@ class DnsTcpProxy:
         self.nameservers = nameservers
 
 
-class PortForward:
+class InternalPortForwarding:
     def __init__(self, nft_rule, ttl=1):
         self.nft_rule = nft_rule
         self.ttl = ttl
@@ -306,7 +306,7 @@ class Hop:
             self.log_debug('Previous hop did not expose DNS servers.')
 
     @property
-    def port_forwards(self) -> List[PortForward]:
+    def port_forwards(self) -> List[InternalPortForwarding]:
         return []
 
     @staticmethod
