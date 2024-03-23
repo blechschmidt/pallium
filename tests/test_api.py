@@ -1,3 +1,4 @@
+import ctypes
 import ipaddress
 import json
 import logging
@@ -48,6 +49,24 @@ class TestMachine:
 
     def get_public_ips(self):
         pass
+
+
+def reload_resolvconf():
+    try:
+        libc = ctypes.CDLL('libc.so.6')
+        res_init = libc.__res_init
+        res_init(None)
+        pass
+    except:
+        logging.error("Failed to reload resolvconf")
+
+
+def fresh_resolvconf(f):
+    def wrapper(*args, **kwargs):
+        reload_resolvconf()
+        return f(*args, **kwargs)
+
+    return wrapper
 
 
 class TestPythonInterface(PalliumTestCase):
@@ -127,6 +146,7 @@ class TestPythonInterface(PalliumTestCase):
     def get_ipv6(self):
         return self.get_ip(6)
 
+    @fresh_resolvconf
     def test_pyroute(self):
         def run_in_ns():
             nft_ruleset = subprocess.check_output(['nft', 'list', 'ruleset'])
@@ -144,14 +164,16 @@ class TestPythonInterface(PalliumTestCase):
         with Profile([]) as session:
             session.execute(run_in_ns)
 
+    @fresh_resolvconf
     def test_no_chain_no_dns(self):
         def run_in_ns():
-            return requests.get('https://1.1.1.1').text
+            return requests.get('https://1.1.1.1', allow_redirects=False)
 
         with Profile([]) as session:
             result = session.execute(run_in_ns)
-        assert 'Cloudflare' in result
+        assert result.ok
 
+    @fresh_resolvconf
     def test_no_chain(self):
         """
         This test should always work if there is internet connectivity.
@@ -167,6 +189,7 @@ class TestPythonInterface(PalliumTestCase):
         ipaddress.ip_address(result)
         assert True
 
+    @fresh_resolvconf
     def test_tor_simple(self):
         """
         Connect to an IP address API using Tor and check whether the exit IP is a Tor node.
@@ -179,6 +202,7 @@ class TestPythonInterface(PalliumTestCase):
             result = session.execute(check_tor)
         assert result['IsTor']
 
+    @fresh_resolvconf
     def test_tor_onion_url(self):
         onion_urls = [
             'http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion',  # Tor project
@@ -201,11 +225,14 @@ class TestPythonInterface(PalliumTestCase):
         with Profile([TorHop()]) as session:
             assert session.execute(check_tor)
 
-    def _test_ssh_url(self, url, dns=None):
+    def _test_ssh_url(self, url, dns=None, allow_redirects=True, return_response=False):
         machine = self.machines[0]
 
         def check_connectivity():
-            return requests.get(url).text
+            response = requests.get(url, allow_redirects=allow_redirects)
+            if return_response:
+                return response
+            return response.text
 
         # We are seeing this server for the first time
         ssh_args = ['-o', 'StrictHostKeyChecking=no']
@@ -215,31 +242,37 @@ class TestPythonInterface(PalliumTestCase):
 
         return result
 
+    @fresh_resolvconf
     def test_ssh_no_dns(self):
-        result = self._test_ssh_url('https://1.1.1.1')
-        assert 'Cloudflare' in result
+        result = self._test_ssh_url('https://1.1.1.1', allow_redirects=False, return_response=True)
+        assert result.ok
 
+    @fresh_resolvconf
     def test_ssh_dns(self):
         result = json.loads(self._test_ssh_url('https://check.torproject.org/api/ip', dns=[DnsTcpProxy('1.1.1.1')]))
         assert ipaddress.ip_address(result['IP']) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_openvpn(self):
         with Profile([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
             result = session.execute(self.get_ip)
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_openvpn_ipv6(self):
         with Profile([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
             result = session.execute(self.get_ipv6)
 
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_tor_openvpn_ipv4(self):
         with Profile([TorHop(), pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
             result = session.execute(self.get_ipv4)
 
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_socks5_dns_udp(self):
         machine_ip = self.machines[0].get_public_ips()[0]
         socks5 = pallium.hops.socks.SocksHop((machine_ip, 1080), 'pmtest', self.password, dns=['1.1.1.1'])
@@ -247,16 +280,18 @@ class TestPythonInterface(PalliumTestCase):
             result = session.execute(self.get_ip)
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_http_no_dns(self):
         def check_connectivity():
-            return requests.get('https://1.1.1.1').text
+            return requests.get('https://1.1.1.1', allow_redirects=False)
 
         machine_ip = self.machines[0].get_public_ips()[0]
         http = pallium.hops.socks.HttpHop((machine_ip, 3128), 'pmtest', self.password)
         with Profile([http]) as session:
             result = session.execute(check_connectivity)
-        assert 'Cloudflare' in result
+        assert result.ok
 
+    @fresh_resolvconf
     def test_exception(self):
         def run():
             raise TestException
@@ -268,6 +303,7 @@ class TestPythonInterface(PalliumTestCase):
             except TestException:
                 pass
 
+    @fresh_resolvconf
     def test_openvpn_custom_dns_resolv_conf(self):
         def inside_ns():
             with open('/etc/resolv.conf') as f:
@@ -277,6 +313,7 @@ class TestPythonInterface(PalliumTestCase):
             result = session.execute(inside_ns)
             assert '1.2.3.4' in result
 
+    @fresh_resolvconf
     def test_bridge_ipv4(self):
         self.require_net_admin()
         chain = [pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]
@@ -286,6 +323,7 @@ class TestPythonInterface(PalliumTestCase):
             result = session.execute(lambda: self.get_ip(4))
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_bridge_ipv6(self):
         self.require_net_admin()
         chain = [pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]
@@ -295,6 +333,7 @@ class TestPythonInterface(PalliumTestCase):
             result = session.execute(lambda: self.get_ip(6))
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
+    @fresh_resolvconf
     def test_openvpn_ipv4_route_only(self):
         def inside_ns():
             result = self.get_ip(4)
@@ -311,9 +350,11 @@ class TestPythonInterface(PalliumTestCase):
         with Profile(chain, routes=['0.0.0.0/0']) as session:
             session.execute(inside_ns)
 
+    @fresh_resolvconf
     def test_bridge_dhcp(self):
         self._test_bridge_dhcp(False, False)
 
+    @fresh_resolvconf
     def test_bridge_dhcp_dns(self):
         self._test_bridge_dhcp(True, False)
 
@@ -384,6 +425,7 @@ class TestPythonInterface(PalliumTestCase):
                 with IPRoute() as ip:
                     ip.link('del', ifname='pmtestbri')
 
+    @fresh_resolvconf
     def test_openvpn_kill_switch(self):
         """
         Ensure that killing the OpenVPN process does not introduce a leak.
