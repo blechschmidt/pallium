@@ -4,6 +4,7 @@ import os
 import shutil
 import signal
 import subprocess
+import typing
 from typing import Optional, Union, List
 
 from pyroute2.iproute import IPRoute
@@ -108,6 +109,22 @@ class Hop:
         # Hops may want to override the required routes immediately, e.g. by implementing a getter
         if 'required_routes' not in dir(self):
             self.required_routes = []
+
+    @classmethod
+    def from_json(cls, value: typing.Dict[str, typing.Any]) -> 'Hop':
+        value = dict(value)
+        type2class = dict()
+        for hop_class in util.get_subclasses(cls):
+            class_name = hop_class.__name__
+            if hop_class.__name__.endswith('Hop'):
+                class_name = class_name[:-len('Hop')]
+            type2class[class_name.lower()] = hop_class
+
+        hop_type = value.pop('type')
+        hop_class = type2class.get(hop_type.lower())
+        if hop_class is None:
+            raise ""
+        return hop_class(**value)
 
     def popen(self, *args, **kwargs):
         """Popen wrapper that keeps track of the started processes and handles command output.

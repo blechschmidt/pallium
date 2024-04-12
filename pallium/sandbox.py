@@ -438,6 +438,10 @@ class Sandbox:
         self.paths.append(BindMountExternal('/run/user/%d/pulse/' % security.EUID))
 
     def _setup_gui(self, method):
+        original_display = os.environ.get('DISPLAY', None)
+        if original_display is not None and original_display.startswith(':'):
+            original_display = int(original_display[1:])
+
         if method == 'xpra' or method is True:
             display_no = xpra.start_xpra()
             display = ':%d' % display_no
@@ -447,7 +451,7 @@ class Sandbox:
             display = os.environ.get('DISPLAY', None)
         if display is not None and display.startswith(':'):
             display = int(display[1:])
-            self.paths.append(BindMountExternal('/tmp/.X11-unix/X1', '/tmp/.X11-unix/X%d' % display))
+            self.paths.append(BindMountExternal('/tmp/.X11-unix/X%s' % original_display, '/tmp/.X11-unix/X%d' % display))
 
     def _etc_virtuser_mounts(self, virtual_user):
         pwd_struct = pwd.getpwuid(security.RUID)

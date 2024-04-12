@@ -4,21 +4,115 @@ import ipaddress
 
 import typing
 
-from pallium import typeinfo
-from pallium.exceptions import ConfigurationError
-from pallium.sandbox import Sandbox
+from . import typeinfo, hops
+from .exceptions import ConfigurationError
+from .sandbox import Sandbox
+
+_T = typing.TypeVar('_T')
+_primitive_types = [int, bool, str, float]
 
 
-class FromJSON:
+def json_serializable(cls: typing.Type[_T]) -> typing.Type[_T]:
+    """
+    There are libs for this type of functionality, but we want to keep
+    dependencies low for security reasons.
+    """
+
+    def json_value_to_instance(value, tp=None):
+        assert tp is not None, "Implementation requires type hinting."
+
+        if typing.get_origin(tp) == typing.Optional \
+                or typing.get_origin(tp) == typing.Union and len(typing.get_args(tp)) == 2 \
+                and type(None) in set(typing.get_args(tp)):
+            if value is None:
+                return None
+            # Unpack optional type
+            tp = typing.get_args(tp)[0]
+
+        if typing.get_origin(tp) == typing.Any:
+            return value
+
+        if tp in tuple(_primitive_types):
+            if not isinstance(value, tp):
+                raise ConfigurationError('Expected a %s' % tp)
+            return value
+
+        if typing.get_origin(tp) == list:
+            if not isinstance(value, list):
+                raise ConfigurationError('Expected a list')
+            return [json_value_to_instance(v, typing.get_args(tp)[0]) for v in value]
+
+        if not isinstance(value, dict):
+            raise ConfigurationError('Complex classes need to be deserialized from dict')
+
+        if hasattr(tp, 'from_json') and callable(tp.from_json):
+            return tp.from_json(value)
+
+        return from_json(tp, value)
+
+    def from_json(cls, json_data: typing.Dict[str, typing.Any]) -> _T:
+        constructor = {}
+        for key, value in json_data.items():
+            if key not in cls.__annotations__:
+                continue
+            attr_type = cls.__annotations__[key]
+            instance = json_value_to_instance(value, attr_type)
+            constructor[key] = instance
+        instance = cls(**constructor)
+
+        return instance
+
+    if not hasattr(cls, 'from_json'):
+        setattr(cls, 'from_json', classmethod(from_json))
+    return cls
+
+
+class EthernetBridge:
+    def __init__(self, devices: typing.List[str], name: typing.Optional[str] = None):
+        self.name = name
+        self.devices = devices
+
     @classmethod
     def from_json(cls, obj):
-        pass
+        return cls(**obj)
 
 
+class Bridge:
+    def __init__(self, name: typing.Optional[str] = None,
+                 routes: typing.List[typing.Union[ipaddress.ip_network, str]] = None,
+                 dhcp: bool = False,
+                 eth_bridge: typing.Optional[EthernetBridge] = None,
+                 reserved_bypass: bool = True):
+        """
+        A descriptor for building a bridge inside the main network namespace.
+
+        @param name: Bridge name. If unspecified, an automatically generated deterministic name is used.
+        @param routes: IP networks that should pass through the bridge.
+        @param dhcp: Whether a DHCP server should be started, providing clients with IP addresses.
+        @param eth_bridge: TODO.
+        @param reserved_bypass: Whether reserved addresses bypass the bridge.
+        """
+        if routes is None:
+            routes = []
+        routes = list(map(ipaddress.ip_network, routes))
+        self.name = name
+        self.routes = routes
+        self.dhcp = dhcp
+        self.eth_bridge = eth_bridge
+        self.reserved_bypass = reserved_bypass
+
+    @classmethod
+    def from_json(cls, obj):
+        if 'eth_bridge' in obj:
+            obj['eth_bridge'] = EthernetBridge.from_json(obj['eth_bridge'])
+        return cls(**obj)
+
+
+@json_serializable
 class LocalPortForwarding:
     protocol: str  # Either "tcp" or "udp"
-    host: (typeinfo.IPAddress, int)
-    guest: (typeinfo.IPAddress, int)
+    host: typing.Tuple[typeinfo.IPAddress, int]
+    guest: typing.Tuple[typeinfo.IPAddress, int]
 
     def __init__(self, spec):
         scheme, rest = spec.split('://', 1)
@@ -52,6 +146,7 @@ class LocalPortForwarding:
         return cls(obj)
 
 
+@json_serializable
 @dataclasses.dataclass
 class PortForwarding:
     local: typing.List[LocalPortForwarding] = dataclasses.field(default_factory=list)
@@ -68,12 +163,26 @@ class PortForwarding:
         return result
 
 
+@json_serializable
+@dataclasses.dataclass
+class Run:
+    command: typing.Optional[typing.List[str]] = dataclasses.field(default=None)
+    quiet: bool = dataclasses.field(default=False)  # Whether to suppress status information of pallium and its helpers
+
+
+@json_serializable
 @dataclasses.dataclass
 class Networking:
     port_forwarding: PortForwarding = dataclasses.field(default_factory=PortForwarding)
+    chain: typing.List[hops.Hop] = dataclasses.field(default_factory=list)
+    bridge: typing.Optional[Bridge] = dataclasses.field(default=None)
+    routes: typing.Optional[typing.List[str]] = dataclasses.field(default=None)
+    kill_switch: bool = dataclasses.field(default=True)
 
 
+@json_serializable
 @dataclasses.dataclass
 class Configuration:
     networking: Networking = dataclasses.field(default_factory=Networking)
-    sandbox: Sandbox = None
+    sandbox: typing.Optional[Sandbox] = dataclasses.field(default_factory=Sandbox)
+    run: Run = dataclasses.field(default_factory=Run)

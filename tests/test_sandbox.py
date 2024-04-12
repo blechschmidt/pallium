@@ -46,8 +46,8 @@ class PalliumTestCase(unittest.TestCase):
                 "virtuser": "johndoe"
             }
         }
-
-        assert get_output(profile, 'whoami') == 'johndoe'
+        whoami_output = get_output(profile, 'whoami')
+        assert whoami_output == 'johndoe'
         assert 'johndoe' in get_output(profile, ['sh', '-c', 'echo "$HOME"'])
 
     def test_minimal_filesystem(self):

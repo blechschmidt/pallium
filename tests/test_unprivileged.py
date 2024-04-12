@@ -10,6 +10,7 @@ import http.server
 import pallium.sysutil
 from pallium import sysutil, onexit
 from pallium.profiles import Profile
+import pallium.config as config
 
 
 class PalliumTestCase(unittest.TestCase):
@@ -23,13 +24,13 @@ class PalliumTestCase(unittest.TestCase):
                 self.send_response(204)
                 self.end_headers()
 
-        profile = Profile.from_config({
+        conf = config.Configuration.from_json({
             'sandbox': {
                 'gui': True,
                 'virtuser': '$tmp'
-            },
-            'chain': []
+            }
         })
+        profile = Profile(conf)
         session = profile.run()
 
         def run():
@@ -54,6 +55,7 @@ class PalliumTestCase(unittest.TestCase):
                 home = tempfile.mkdtemp(prefix='pallium_cli_test_gui_')
                 os.chown(home, UID, UID)"""
                 os.environ['HOME'] = '/tmp'
+                # p = subprocess.Popen(['id'])
                 p = subprocess.Popen(['firefox', url])
                 onexit.register(lambda: os.kill(p.pid, signal.SIGTERM))
                 rlist, _, _ = select.select([read], [], [], 30)

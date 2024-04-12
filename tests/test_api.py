@@ -23,6 +23,8 @@ from pallium.hops.tor import TorHop
 from pallium.nftables import NFTables, NFPROTO_INET
 from pallium.profiles import Profile
 from provision import DigitalOceanProvisioner, Machine
+from pallium.config import Configuration
+import pallium.config as config
 
 
 class PalliumTestCase(unittest.TestCase):
@@ -67,6 +69,14 @@ def fresh_resolvconf(f):
         return f(*args, **kwargs)
 
     return wrapper
+
+
+def config_from_chain(chain):
+    return config.Configuration(
+        networking=config.Networking(
+            chain=chain
+        )
+    )
 
 
 class TestPythonInterface(PalliumTestCase):
@@ -161,7 +171,7 @@ class TestPythonInterface(PalliumTestCase):
             with NFTables(nfgen_family=NFPROTO_INET) as nft:
                 nft.table('del', name='pyroute_nftables_test')
 
-        with Profile([]) as session:
+        with Profile(config.Configuration()) as session:
             session.execute(run_in_ns)
 
     @fresh_resolvconf
@@ -169,7 +179,7 @@ class TestPythonInterface(PalliumTestCase):
         def run_in_ns():
             return requests.get('https://1.1.1.1', allow_redirects=False)
 
-        with Profile([]) as session:
+        with Profile(Configuration()) as session:
             result = session.execute(run_in_ns)
         assert result.ok
 
@@ -184,7 +194,7 @@ class TestPythonInterface(PalliumTestCase):
         def run_in_ns():
             return self.get_ip()
 
-        with Profile([]) as session:
+        with Profile(Configuration()) as session:
             result = session.execute(run_in_ns)
         ipaddress.ip_address(result)
         assert True
@@ -198,7 +208,11 @@ class TestPythonInterface(PalliumTestCase):
         def check_tor():
             return requests.get('https://check.torproject.org/api/ip').json()
 
-        with Profile([TorHop()]) as session:
+        with Profile(config.Configuration(
+            networking=config.Networking(
+                chain=[TorHop()]
+            )
+        )) as session:
             result = session.execute(check_tor)
         assert result['IsTor']
 
@@ -222,7 +236,11 @@ class TestPythonInterface(PalliumTestCase):
                     continue
             return False
 
-        with Profile([TorHop()]) as session:
+        with Profile(config.Configuration(
+            networking=config.Networking(
+                chain=[TorHop()]
+            )
+        )) as session:
             assert session.execute(check_tor)
 
     def _test_ssh_url(self, url, dns=None, allow_redirects=True, return_response=False):
@@ -236,8 +254,16 @@ class TestPythonInterface(PalliumTestCase):
 
         # We are seeing this server for the first time
         ssh_args = ['-o', 'StrictHostKeyChecking=no']
-        with Profile([pallium.hops.ssh.SshHop(machine.get_ssh_destination(), ssh_args=ssh_args, dns=dns)],
-                     quiet=True) as session:
+        with Profile(
+            config.Configuration(
+                networking=config.Networking(
+                    chain=[
+                        pallium.hops.ssh.SshHop(machine.get_ssh_destination(), ssh_args=ssh_args, dns=dns)
+                    ]
+                ),
+                run=config.Run(quiet=True)
+            )
+        ) as session:
             result = session.execute(check_connectivity)
 
         return result
@@ -254,20 +280,20 @@ class TestPythonInterface(PalliumTestCase):
 
     @fresh_resolvconf
     def test_openvpn(self):
-        with Profile([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
+        with Profile(config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])) as session:
             result = session.execute(self.get_ip)
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
     @fresh_resolvconf
     def test_openvpn_ipv6(self):
-        with Profile([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
+        with Profile(config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])) as session:
             result = session.execute(self.get_ipv6)
 
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
     @fresh_resolvconf
     def test_tor_openvpn_ipv4(self):
-        with Profile([TorHop(), pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]) as session:
+        with Profile(config_from_chain([TorHop(), pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])) as session:
             result = session.execute(self.get_ipv4)
 
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
@@ -276,7 +302,7 @@ class TestPythonInterface(PalliumTestCase):
     def test_socks5_dns_udp(self):
         machine_ip = self.machines[0].get_public_ips()[0]
         socks5 = pallium.hops.socks.SocksHop((machine_ip, 1080), 'pmtest', self.password, dns=['1.1.1.1'])
-        with Profile([socks5]) as session:
+        with Profile(config_from_chain([socks5])) as session:
             result = session.execute(self.get_ip)
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
@@ -287,7 +313,7 @@ class TestPythonInterface(PalliumTestCase):
 
         machine_ip = self.machines[0].get_public_ips()[0]
         http = pallium.hops.socks.HttpHop((machine_ip, 3128), 'pmtest', self.password)
-        with Profile([http]) as session:
+        with Profile(config_from_chain([http])) as session:
             result = session.execute(check_connectivity)
         assert result.ok
 
@@ -296,7 +322,7 @@ class TestPythonInterface(PalliumTestCase):
         def run():
             raise TestException
 
-        with Profile([]) as session:
+        with Profile(config_from_chain([])) as session:
             try:
                 session.execute(run)
                 assert False
@@ -309,27 +335,25 @@ class TestPythonInterface(PalliumTestCase):
             with open('/etc/resolv.conf') as f:
                 return f.read()
 
-        with Profile([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file, dns=['1.2.3.4'])]) as session:
+        with Profile(config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file, dns=['1.2.3.4'])])) as session:
             result = session.execute(inside_ns)
             assert '1.2.3.4' in result
 
     @fresh_resolvconf
     def test_bridge_ipv4(self):
         self.require_net_admin()
-        chain = [pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]
-        bridge = pallium.profiles.Bridge(routes=['0.0.0.0/0'])
-        bridge.dhcp = False
-        with Profile(chain, bridge=bridge) as session:
+        conf = config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])
+        conf.networking.bridge = config.Bridge(routes=['0.0.0.0/0'], dhcp=False)
+        with Profile(conf) as session:
             result = session.execute(lambda: self.get_ip(4))
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
     @fresh_resolvconf
     def test_bridge_ipv6(self):
         self.require_net_admin()
-        chain = [pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]
-        bridge = pallium.profiles.Bridge(routes=['::/0'])
-        bridge.dhcp = False
-        with Profile(chain, bridge=bridge) as session:
+        conf = config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])
+        conf.networking.bridge = config.Bridge(routes=['::/0'], dhcp=False)
+        with Profile(conf) as session:
             result = session.execute(lambda: self.get_ip(6))
         assert ipaddress.ip_address(result) in self.machines[0].get_public_ips()
 
@@ -346,8 +370,9 @@ class TestPythonInterface(PalliumTestCase):
                 raised = True
             assert raised
 
-        chain = [pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)]
-        with Profile(chain, routes=['0.0.0.0/0']) as session:
+        conf = config_from_chain([pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file)])
+        conf.networking.routes = ['0.0.0.0/0']
+        with Profile(conf) as session:
             session.execute(inside_ns)
 
     @fresh_resolvconf
@@ -369,14 +394,15 @@ class TestPythonInterface(PalliumTestCase):
             bridge_name = None
         else:
             bridge_name = 'pmtestbri'
-        bridge = pallium.profiles.Bridge(name=bridge_name)
+        conf = config_from_chain(chain)
+        conf.networking.bridge = config.Bridge(name=bridge_name)
         if test_eth_bridge:
             with IPRoute() as ip:
                 ip.link('add', ifname='pmtestbri', kind='dummy')
-            bridge.eth_bridge = pallium.profiles.EthernetBridge(devices=['pmtestbri'])
-        bridge.dhcp = True
+            conf.networking.bridge.eth_bridge = config.EthernetBridge(devices=['pmtestbri'])
+        conf.networking.bridge.dhcp = True
         try:
-            with Profile(chain, bridge=bridge):
+            with Profile(conf):
                 read_from_child, write_to_parent = os.pipe()
                 read_from_parent, write_to_child = os.pipe()
                 pid = os.fork()
@@ -437,7 +463,9 @@ class TestPythonInterface(PalliumTestCase):
         """
         my_ip = ipaddress.ip_address(self.get_ipv4())
         ovpn_hop = pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file, dns=['1.1.1.1'])
-        with Profile([ovpn_hop], kill_switch=False) as session:
+        conf = config_from_chain([ovpn_hop])
+        conf.networking.kill_switch = False
+        with Profile(conf) as session:
             vpn_ip = ipaddress.ip_address(session.execute(self.get_ipv4))
             assert vpn_ip in self.machines[0].get_public_ips()
 
@@ -455,7 +483,9 @@ class TestPythonInterface(PalliumTestCase):
             assert my_ip == bypass_vpn_ip
 
         ovpn_hop = pallium.hops.openvpn.OpenVpnHop(config=self.ovpn_config_file, dns=['1.1.1.1'])
-        with Profile([ovpn_hop]) as session:
+        conf2 = config_from_chain([ovpn_hop])
+        conf2.networking.kill_switch = True
+        with Profile(conf2) as session:
             vpn_ip = ipaddress.ip_address(session.execute(self.get_ipv4))
             assert vpn_ip in self.machines[0].get_public_ips()
 

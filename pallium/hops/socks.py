@@ -18,9 +18,9 @@ class Tun2socksHop(hop.Hop):
     def __init__(self, protocol, address, username=None, password=None, **kwargs):
         super().__init__(**kwargs)
         self._pid = None
-        self._address, self._port = util.convert2addr(address, self.default_port)
-        self._username, self._password = username, password
-        self.required_routes = [ipaddress.ip_network(self._address)]
+        self.address, self.port = util.convert2addr(address, self.default_port)
+        self.username, self.password = username, password
+        self.required_routes = [ipaddress.ip_network(self.address)]
         self.protocol = protocol
 
     def free(self):
@@ -55,14 +55,14 @@ class Tun2socksHop(hop.Hop):
 
         # https://github.com/xjasonlyu/tun2socks
         url_credentials = ''
-        if self._username is not None:
-            url_credentials += urllib.parse.quote(self._username)
-            if self._password is not None:
-                url_credentials += ':' + urllib.parse.quote(self._password)
+        if self.username is not None:
+            url_credentials += urllib.parse.quote(self.username)
+            if self.password is not None:
+                url_credentials += ':' + urllib.parse.quote(self.password)
             url_credentials += '@'
 
         cmd = [self.get_tool_path('tun2socks'), '-device', 'tun0',
-               '-proxy', self.protocol + '://%s%s:%d' % (url_credentials, str(self._address), self._port)]
+               '-proxy', self.protocol + '://%s%s:%d' % (url_credentials, str(self.address), self.port)]
 
         proc = self.popen(cmd)
         self._pid = proc.pid

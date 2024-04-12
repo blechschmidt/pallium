@@ -20,6 +20,7 @@ from pyroute2.ethtool import Ethtool
 from pyroute2.netlink.rtnl.ifaddrmsg import IFA_F_NODAD, IFA_F_NOPREFIXROUTE
 from pyroute2.netlink.exceptions import NetlinkError
 
+import pallium.config
 from .nftables import NFTables
 
 from . import audio, debugging, resolvconf, runtime
@@ -59,47 +60,6 @@ class ProfileManager:
         return result
 
 
-class EthernetBridge:
-    def __init__(self, devices: List[str], name: Optional[str] = None):
-        self.name = name
-        self.devices = devices
-
-    @classmethod
-    def from_json(cls, obj):
-        return cls(**obj)
-
-
-class Bridge:
-    def __init__(self, name: Optional[str] = None,
-                 routes: List[Union[ipaddress.ip_network, str]] = None,
-                 dhcp: bool = False,
-                 eth_bridge: Optional[EthernetBridge] = None,
-                 reserved_bypass: bool = True):
-        """
-        A descriptor for building a bridge inside the main network namespace.
-
-        @param name: Bridge name. If unspecified, an automatically generated deterministic name is used.
-        @param routes: IP networks that should pass through the bridge.
-        @param dhcp: Whether a DHCP server should be started, providing clients with IP addresses.
-        @param eth_bridge: TODO.
-        @param reserved_bypass: Whether reserved addresses bypass the bridge.
-        """
-        if routes is None:
-            routes = []
-        routes = list(map(ipaddress.ip_network, routes))
-        self.name = name
-        self.routes = routes
-        self.dhcp = dhcp
-        self.eth_bridge = eth_bridge
-        self.reserved_bypass = reserved_bypass
-
-    @classmethod
-    def from_json(cls, obj):
-        if 'eth_bridge' in obj:
-            obj['eth_bridge'] = EthernetBridge.from_json(obj['eth_bridge'])
-        return cls(**obj)
-
-
 class NetPool:
     """
     This class keeps track of used IP addresses such that duplicate assignments are avoided.
@@ -118,20 +78,10 @@ class Profile:
     debug = False
     quiet = None
 
-    def __init__(self, chain: List[hops.Hop], *,  # The API is not stable yet. Prevent positional args.
-                 start_networks: List[IPNetworkLike] = None,
-                 user: Union[str, int] = None,
-                 quiet: Optional[bool] = None,
-                 bridge: Optional[Bridge] = None,
-                 routes: List[IPNetworkLike] = None,
-                 preexec_fn: Optional[List[Callable]] = None,
-                 postexec_fn: Optional[List[Callable]] = None,
-                 enter: bool = False,
-                 kill_switch: bool = True,
-                 mounts: Optional[List[MountInstruction]] = None,
-                 sandbox: Sandbox = None,
-                 command: Union[List[str], str, None] = None,
-                 configuration: config.Configuration = None):
+    def _prepare_for_execution(self, configuration: config.Configuration):
+        pass
+
+    def __init__(self, conf: config.Configuration):
         """
         Initialize a pallium profile.
 
@@ -148,26 +98,29 @@ class Profile:
         @param kill_switch: When enabled, traffic is not allowed to bypass hops.
         """
         self._filepath = None
+        chain = conf.networking.chain
         if len(chain) == 0 or not isinstance(chain[-1], DummyHop):
             chain.append(DummyHop())
         self.chain = chain
-        if start_networks is not None:
-            raise NotImplementedError('start_networks is currently unsupported.')
-        else:
-            start_networks = []
+
+        # TODO: Include this in config
+        start_networks = []
         self.start_networks = list(map(ipaddress.ip_network, start_networks))
         self.netinfo = None
-        self.bridge = bridge
-        self._preexec_fn = [] if preexec_fn is None else preexec_fn
-        self._postexec_fn = [] if postexec_fn is None else postexec_fn
-        self.user = user
+        self.bridge = conf.networking.bridge
+        self._preexec_fn = []
+        self._postexec_fn = []
+        # TODO: Support
+        self.user = None
         self.netpool = NetPool()
-        self.command = command
+        self.command = conf.run.command
+        routes = conf.networking.routes
         if routes is not None:
             chain[-1].required_routes = list(map(ipaddress.ip_network, routes))
 
         # If Profile.quiet is a boolean class property and no quiet value has been supplied to the constructor,
         # we use Profile.quiet as a default value.
+        quiet = conf.run.quiet
         if quiet is None and isinstance(Profile.quiet, bool):
             quiet = Profile.quiet
         self._set_quiet(quiet)
@@ -175,19 +128,20 @@ class Profile:
         for hop in self.chain:
             if self.debug:
                 hop.debug = True
-        self._enter = enter
+        # TODO: Make use of this?
+        self._enter = False
         self._context_sessions = []
-        self.kill_switch = kill_switch
-        self._mounts = mounts if mounts is not None else []
+        self.kill_switch = conf.networking.kill_switch
+        self._mounts = []
         self.has_connected_functions = False
 
-        self.sandbox = sandbox
-        if sandbox is not None:
+        self.sandbox = conf.sandbox
+        if self.sandbox is not None:
             self._mounts.extend(self.sandbox.get_mounts())
 
-        if configuration is None:
-            configuration = config.Configuration()
-        self.config = configuration
+        if conf is None:
+            conf = config.Configuration()
+        self.config = conf
 
     # noinspection PyRedeclaration
     @property
@@ -218,6 +172,9 @@ class Profile:
         @param settings: The settings as dictionary.
         @return: A profile which was constructed according to the settings.
         """
+
+        return Profile(pallium.config.Configuration.from_json(settings))
+
         if 'chain' not in settings:
             settings['chain'] = []
 
@@ -254,13 +211,6 @@ class Profile:
             )
         )
 
-        defaults = {}
-        for k in settings:
-            if not k.startswith('default_'):
-                continue
-            argname = k[len('default_'):]
-            defaults[argname] = settings[k]
-
         type2class = dict()
         for hop_class in util.get_subclasses(hops.Hop):
             class_name = hop_class.__name__
@@ -278,10 +228,6 @@ class Profile:
             del hop_option['type']
             if tp not in type2class:
                 raise ConfigurationError('Invalid hop type: "%s"' % tp)
-
-            for k in defaults:
-                if util.supports_named_arg(type2class[tp], k):
-                    hop_option.set_default(k, defaults[k])
 
             remove = []
             for k in hop_option:
@@ -311,8 +257,9 @@ class Profile:
                 del hop_option[r]
 
             # noinspection PyArgumentList
-            hop = type2class[tp](**hop_option)
-            chain.append(hop)
+            # hop = type2class[tp](**hop_option)
+            # chain.append(hop)
+        chain = [hops.Hop.from_json(h) for h in settings['chain']]
 
         profile_args['routes'] = settings.get('routes', None)
         profile_args['mounts'] = []
