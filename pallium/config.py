@@ -184,5 +184,5 @@ class Networking:
 @dataclasses.dataclass
 class Configuration:
     networking: Networking = dataclasses.field(default_factory=Networking)
-    sandbox: typing.Optional[Sandbox] = dataclasses.field(default_factory=Sandbox)
+    sandbox: typing.Optional[Sandbox] = dataclasses.field(default=None)
     run: Run = dataclasses.field(default_factory=Run)
