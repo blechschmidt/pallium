@@ -90,13 +90,13 @@ class SocksAppHop(hop.Hop):
         process = self.popen(self.cmd, **kwargs)
         self._proc_pid = process.pid
         # Wait for the SOCKS listener to appear
-        self.log_debug('Waiting for SSH socks endpoint to appear at %s.' % str(self._socks_endpoint))
+        self.log_debug('Waiting for SOCKS endpoint to appear at %s.' % str(self._socks_endpoint))
 
         def ssh_error():
             returncode = process.poll()
             if returncode is not None and returncode != 0:
-                # TODO: Include SSH output in exception.
-                raise ConnectionError('SSH exited with code %d' % returncode)
+                # TODO: Include command output in exception.
+                raise ConnectionError('SOCKS app command exited with code %d' % returncode)
 
         if not wait_for_listener(self._socks_endpoint, exception_function=ssh_error):
             raise TimeoutError

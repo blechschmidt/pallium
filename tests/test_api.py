@@ -261,7 +261,7 @@ class TestPythonInterface(PalliumTestCase):
                         pallium.hops.ssh.SshHop(machine.get_ssh_destination(), ssh_args=ssh_args, dns=dns)
                     ]
                 ),
-                run=config.Run(quiet=True)
+                run=config.Run()
             )
         ) as session:
             result = session.execute(check_connectivity)

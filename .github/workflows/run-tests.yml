@@ -25,7 +25,18 @@ jobs:
       - name: Prepare environment
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
-        run: mkdir -p ~/.ssh && echo "$SSH_KEY" >> ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa && sudo systemctl stop systemd-resolved && sudo bash -c 'rm /etc/resolv.conf; echo "nameserver 1.1.1.1" > /etc/resolv.conf' && sudo iptables -P FORWARD ACCEPT && sudo ip6tables -P FORWARD ACCEPT
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          sudo mkdir -p /root/.ssh
+          sudo cp ~/.ssh/id_rsa /root/.ssh/id_rsa
+          sudo chmod 600 /root/.ssh/id_rsa
+          sudo systemctl stop systemd-resolved
+          sudo bash -c 'rm /etc/resolv.conf
+          echo "nameserver 1.1.1.1" > /etc/resolv.conf'
+          sudo iptables -P FORWARD ACCEPT
+          sudo ip6tables -P FORWARD ACCEPT
       #- name: Setup upterm session
       #  uses: lhotari/action-upterm@v1
       - name: Populate .env
