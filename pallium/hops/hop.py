@@ -111,8 +111,23 @@ class Hop:
             self.required_routes = []
 
     @classmethod
-    def from_json(cls, value: typing.Dict[str, typing.Any]) -> 'Hop':
-        value = dict(value)
+    def from_json(cls, obj: typing.Dict[str, typing.Any]) -> 'Hop':
+        # Do not modify the passed dict.
+        obj = dict(obj)
+
+        if 'dns' in obj:
+            proxied_addrs = []
+            non_proxied_addrs = []
+            for addr in obj['dns']:
+                if addr.startswith('tcp://'):
+                    proxied_addrs.append(addr[6:])
+                else:
+                    non_proxied_addrs.append(addr)
+            dns = non_proxied_addrs
+            if len(proxied_addrs) > 0:
+                dns.append(DnsTcpProxy(proxied_addrs))
+            obj['dns'] = dns
+
         type2class = dict()
         for hop_class in util.get_subclasses(cls):
             class_name = hop_class.__name__
@@ -120,11 +135,12 @@ class Hop:
                 class_name = class_name[:-len('Hop')]
             type2class[class_name.lower()] = hop_class
 
-        hop_type = value.pop('type')
+        hop_type = obj.pop('type')
         hop_class = type2class.get(hop_type.lower())
         if hop_class is None:
             raise ""
-        return hop_class(**value)
+
+        return hop_class(**obj)
 
     def popen(self, *args, **kwargs):
         """Popen wrapper that keeps track of the started processes and handles command output.
@@ -206,6 +222,7 @@ class Hop:
     def free(self):
         self.log_debug('Free hop %s' % repr(self))
         for pid in self.started_pids:
+            # TODO: Why do we have this check again?
             if not security.is_sudo_or_root():
                 continue
             self.log_debug('Kill process %d' % pid)

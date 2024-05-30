@@ -55,13 +55,10 @@ class DHCPServer:
         return conf
 
     def _run_server(self):
-        def preexec_fn():
-            sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGTERM)
 
         self.cmd_args += ['-d' if self.debug else '-k']
         self.dhcp_server = util.popen(['dnsmasq', '--conf-file=-', '--pid-file'] + self.cmd_args,
-                                      stdin=subprocess.PIPE,
-                                      preexec_fn=preexec_fn)
+                                      stdin=subprocess.PIPE)
         sysutil.write_blocking(self.dhcp_server.stdin.fileno(), self._get_conf().encode('ascii'))
         self.dhcp_server.stdin.close()
 

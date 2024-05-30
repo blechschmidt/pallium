@@ -24,8 +24,12 @@ class SshHop(SocksAppHop):
         self._args = ssh_args if ssh_args is not None else []
 
     def update_cmd(self, hop_info):
+
+        # The correct home directory needs to be figured out by OpenSSH.
+        # If the user is fakeroot, the home directory inferred from /etc/passwd will be wrong.
         if not security.is_sudo_or_root():
             sandbox.map_back_real()
+
         self.cmd = ['ssh', '-N', '-D', '%s:%d' % self._socks_endpoint]
         if self._args is not None:
             self.cmd += self._args  # Append custom user-provided arguments

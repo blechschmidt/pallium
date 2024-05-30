@@ -6,6 +6,7 @@ import signal
 import socket
 import struct
 import os
+import subprocess
 import threading
 import time
 
@@ -137,8 +138,6 @@ def setup_dns_tcp_proxy(addresses, non_proxied_addrs=None, bind_addr='127.0.0.1'
         child = os.fork() if forked else None
         if not forked or forked and child == 0:
             if forked:
-                if security.is_sudo_or_root():
-                    sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGKILL)
                 onexit.clear()
             proxy.start(threaded=threaded)
             if forked:

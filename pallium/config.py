@@ -1,6 +1,7 @@
 # Not in use yet
 import dataclasses
 import ipaddress
+import os
 
 import typing
 
@@ -163,10 +164,15 @@ class PortForwarding:
         return result
 
 
+def default_command():
+    shell = os.environ.get('SHELL', '/usr/bin/sh')
+    return [shell]
+
+
 @json_serializable
 @dataclasses.dataclass
 class Run:
-    command: typing.Optional[typing.List[str]] = dataclasses.field(default=None)
+    command: typing.Optional[typing.List[str]] = dataclasses.field(default_factory=default_command)
     quiet: bool = dataclasses.field(default=False)  # Whether to suppress status information of pallium and its helpers
 
 
@@ -184,5 +190,5 @@ class Networking:
 @dataclasses.dataclass
 class Configuration:
     networking: Networking = dataclasses.field(default_factory=Networking)
-    sandbox: typing.Optional[Sandbox] = dataclasses.field(default=None)
+    sandbox: Sandbox = dataclasses.field(default_factory=Sandbox)
     run: Run = dataclasses.field(default_factory=Run)

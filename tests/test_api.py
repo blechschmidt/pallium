@@ -409,9 +409,15 @@ class TestPythonInterface(PalliumTestCase):
                 if pid == 0:
                     os.close(read_from_child)
                     os.close(write_to_child)
+
                     sysutil.unshare(sysutil.CLONE_NEWNS | sysutil.CLONE_NEWNET | sysutil.CLONE_NEWPID)
+
+                    # Do not propagate to parent.
+                    sysutil.mount(b'', b'/', b'none', sysutil.MS_SLAVE | sysutil.MS_REC, None)
+
                     pid2 = os.fork()
                     if pid2 == 0:
+                        # We create an overlay file system, so the /etc/resolv.conf of the main ns is not affected.
                         netns.MountInstruction('tmp', '/tmp', 'tmpfs').mount()
                         os.mkdir('/tmp/etc')
                         os.mkdir('/tmp/workdir')

@@ -202,7 +202,7 @@ def pallium_exec(args):
 
         profile = Profile.from_config(data)
         new_session = True
-    elif config_json:
+    elif config_json is not None:
         profile = Profile.from_config(config_json)
         new_session = True
     else:

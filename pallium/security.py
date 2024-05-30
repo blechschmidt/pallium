@@ -1,3 +1,4 @@
+import pwd
 import sys
 import os
 import stat
@@ -17,9 +18,7 @@ def is_sudo_or_root() -> bool:
     global _is_sudo_or_root
     if _is_sudo_or_root is not None:
         return _is_sudo_or_root
-    ruid, euid, suid = os.getresuid()
-    # rgid, egid, sgid = os.getresgid()
-    _is_sudo_or_root = ruid == 0 or euid == 0
+    _is_sudo_or_root = os.getuid() == 0
     return _is_sudo_or_root
 
 
@@ -30,6 +29,13 @@ def real_user() -> int:
             return 0
         return int(os.environ['SUDO_UID'])
     return ruid
+
+
+def least_privileged_user():
+    try:
+        return pwd.getpwnam("nobody").pw_uid
+    except KeyError:
+        return 0xffff
 
 
 def real_group() -> int:

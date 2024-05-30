@@ -94,7 +94,6 @@ class Profile:
         @param routes: Routes to be routed through the chain. Default: 0.0.0.0/0 and ::0/0
         @param preexec_fn: Functions to be executed inside the main network namespace before running the profile.
         @param postexec_fn: Cleanup functions to be executed when tearing down the connection.
-        @param enter: When enabled, `with Profile(...)` will cause code in the context to be executed in the last netns.
         @param kill_switch: When enabled, traffic is not allowed to bypass hops.
         """
         self._filepath = None
@@ -128,8 +127,6 @@ class Profile:
         for hop in self.chain:
             if self.debug:
                 hop.debug = True
-        # TODO: Make use of this?
-        self._enter = False
         self._context_sessions = []
         self.kill_switch = conf.networking.kill_switch
         self._mounts = []
@@ -174,127 +171,6 @@ class Profile:
         """
 
         return Profile(pallium.config.Configuration.from_json(settings))
-
-        if 'chain' not in settings:
-            settings['chain'] = []
-
-        profile_args = {
-            'preexec_fn': [],
-            'quiet': settings.get('quiet', None)
-        }
-
-        bridge = None
-        if 'bridge' in settings:
-            bridge = dict(BRIDGE_DEFAULTS)
-            bridge.update(settings['bridge'])
-            bridge = Bridge.from_json(bridge)
-        profile_args['bridge'] = bridge
-
-        if 'start_networks' in settings:
-            profile_args['start_networks'] = settings['start_networks']
-            raise ConfigurationError('Currently unsupported')
-
-        sandbox = None
-        if 'sandbox' in settings and not security.is_sudo_or_root():
-            sandbox = Sandbox.from_json(settings['sandbox'])
-        elif not security.is_sudo_or_root():
-            sandbox = Sandbox()
-        profile_args['sandbox'] = sandbox
-
-        # This is (partially) how the configuration should be built.
-        # TODO: Build the configuration like this for all object properties.
-        # When complete, from_config should simply call config.Configuration.from_json.
-        port_forwarding = settings.get('networking', {}).get('port_forwarding', {})
-        profile_args['configuration'] = config.Configuration(
-            networking=config.Networking(
-                port_forwarding=config.PortForwarding.from_json(port_forwarding)
-            )
-        )
-
-        type2class = dict()
-        for hop_class in util.get_subclasses(hops.Hop):
-            class_name = hop_class.__name__
-            if hop_class.__name__.endswith('Hop'):
-                class_name = class_name[:-len('Hop')]
-            type2class[class_name.lower()] = hop_class
-
-        chain = []
-        pulseaudio_proxy = []
-        connected_functions = []
-        for hop_index, hop_option in enumerate(settings['chain']):
-            if 'type' not in hop_option:
-                raise ConfigurationError('Type property required.')
-            tp = hop_option['type']
-            del hop_option['type']
-            if tp not in type2class:
-                raise ConfigurationError('Invalid hop type: "%s"' % tp)
-
-            remove = []
-            for k in hop_option:
-                if k == 'dns':
-                    dns_addrs = hop_option[k]
-                    if isinstance(dns_addrs, str):
-                        dns_addrs = [dns_addrs]
-                    dns_addrs = set(dns_addrs)
-
-                    proxied_addrs = []
-                    non_proxied_addrs = []
-                    for addr in dns_addrs:
-                        if addr.startswith('tcp://'):
-                            proxied_addrs.append(addr[6:])
-                        else:
-                            non_proxied_addrs.append(addr)
-
-                    dns = non_proxied_addrs
-                    if len(proxied_addrs) > 0:
-                        dns.append(DnsTcpProxy(proxied_addrs))
-                    hop_option['dns'] = dns
-                    pass
-                elif not util.supports_named_arg(type2class[tp], k):
-                    raise ConfigurationError('Unsupported property "%s" for hop of type "%s"' % (k, tp))
-
-            for r in remove:
-                del hop_option[r]
-
-            # noinspection PyArgumentList
-            # hop = type2class[tp](**hop_option)
-            # chain.append(hop)
-        chain = [hops.Hop.from_json(h) for h in settings['chain']]
-
-        profile_args['routes'] = settings.get('routes', None)
-        profile_args['mounts'] = []
-
-        if 'run' in settings:
-            run = settings['run']
-
-            user = run.get('user', os.environ.get('SUDO_USER', os.getuid()))
-            profile_args['user'] = user
-
-            if run.get('gui', False) and security.is_sudo_or_root():
-                profile_args['preexec_fn'].append(lambda: enable_gui_access(user))
-
-            if run.get('audio', None) and 'SUDO_USER' in os.environ and 'virtuser' not in run:
-                pulseaudio_proxy.append([os.environ['SUDO_USER'], user])
-
-            if 'command' in run:
-                profile_args['command'] = run['command']
-        else:
-            profile_args['user'] = os.environ.get('SUDO_USER', os.getuid())
-
-        if 'command' not in profile_args:
-            shell = os.environ.get('SHELL', '/usr/bin/sh')
-            profile_args['command'] = [shell]
-
-        dummy = DummyHop()
-        dummy.on_connected(connected_functions)
-        chain.append(dummy)
-
-        for p in pulseaudio_proxy:
-            profile_args['preexec_fn'].append(lambda: audio.proxy_pulseaudio(*p))
-
-        profile = Profile(chain, **profile_args)
-        profile.has_connected_functions = len(connected_functions) > 0
-        return profile
 
     def _create_profile_folder(self):
         if not os.path.exists(runtime.APP_RUN_DIR):
@@ -448,14 +324,10 @@ class Profile:
     def __enter__(self):
         session = self.run()
         self._context_sessions.append(session)
-        if self._enter:
-            session.network_namespaces[-1].enter()
         return session
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         session = self._context_sessions.pop()
-        if self._enter:
-            session.network_namespaces[-1].exit()
         session.close()
 
 
@@ -1108,7 +980,7 @@ class OwnedSession(Session):
 
             if self._bridge.dhcp:
                 # TODO: Transform for fork support.
-                dns = hop_info.netns.run(resolvconf.parse)
+                dns = resolvconf.parse()
                 dhcp_server = dhcpd.DHCPServer(nets, bridge_name_out, dns=dns)
                 dhcp_server.start()
 
@@ -1353,8 +1225,7 @@ class OwnedSession(Session):
         pid_path = os.path.join(self.session_folder, 'netns', 'pids', str(index))
         if not os.path.exists(etc_path):
             os.mkdir(etc_path, 0o755)
-        if not security.is_sudo_or_root():
-            shutil.copyfile('/etc/resolv.conf', os.path.join(etc_path, 'resolv.conf'))
+        shutil.copyfile('/etc/resolv.conf', os.path.join(etc_path, 'resolv.conf'))
         return NetworkNamespace(fd_path, etc_path, pid_path=pid_path)
 
     def run(self, *args, **kwargs):
@@ -1362,7 +1233,7 @@ class OwnedSession(Session):
             return self.profile.sandbox.run(self, *args, **kwargs)
         else:
             call_args = {}
-            if not kwargs.get('root', False):
+            if self.profile.user is not None:
                 call_args = sysutil.privilege_drop_preexec(self.profile.user, True)
             call_args.update(kwargs.get('call_args', {}))
             ns = self.network_namespaces[-1]

@@ -3,6 +3,7 @@ import os
 import pickle
 import signal
 import struct
+import subprocess
 import traceback
 from typing import List, Optional
 
@@ -64,6 +65,9 @@ class MountInstruction:
     def to_json(self):
         return {'src': self.src, 'target': self.target}
 
+    def __repr__(self):
+        return str(self.to_json())
+
 
 # noinspection PyPep8Naming
 class classproperty(object):
@@ -111,6 +115,7 @@ class NetworkNamespace:
         self.fs = None
         self.fd_stack = []
         self.pid = None
+        # TODO: Get rid of PID path. File creation should not be the responsibility of this class.
         self.pid_path = pid_path
 
     @classmethod
@@ -131,91 +136,88 @@ class NetworkNamespace:
             kwargs = {}
         if self.is_default:
             return func(*args, **kwargs)
-        if security.is_sudo_or_root():
-            with self:
-                return func(*args, **kwargs)
-        else:
-            rfchild, w2parent = os.pipe()
-            rfparent, w2child = os.pipe()
-            pid = os.fork()
-            if pid == 0:
+
+        rfchild, w2parent = os.pipe()
+        rfparent, w2child = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            if new_session:
+                os.setpgid(0, 0)
+            sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGTERM)
+            onexit.clear()
+            os.close(rfchild)
+            os.close(w2child)
+            self.enter(exclude_ns=exclude_ns)
+
+            # A second fork is performed because privileges may be dropped inside func which would prevent exit
+            # handlers from releasing the resources acquired by the overlay filesystem due to a lack of permissions.
+            pid2 = os.fork()
+            if pid2 == 0:
                 if new_session:
                     os.setpgid(0, 0)
                 sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGTERM)
                 onexit.clear()
-                os.close(rfchild)
-                os.close(w2child)
-                self.enter(exclude_ns=exclude_ns)
-
-                # A second fork is performed because privileges may be dropped inside func which would prevent exit
-                # handlers from releasing the resources acquired by the overlay filesystem due to a lack of permissions.
-                pid2 = os.fork()
-                if pid2 == 0:
-                    if new_session:
-                        os.setpgid(0, 0)
-                    sysutil.prctl(sysutil.PR_SET_PDEATHSIG, signal.SIGTERM)
-                    onexit.clear()
-                    raised = False
-                    try:
-                        result = func(*args, **kwargs)
-                    except BaseException as e:
-                        traceback.print_exc()
-                        result = e
-                        raised = True
-                    serialized = pickle.dumps(result)
-                    header = struct.pack('=?Q', raised, len(serialized))
-                    try:
-                        sysutil.write_blocking(w2parent, header)
-                        sysutil.write_blocking(w2parent, serialized)
-                        sysutil.read_blocking(rfparent, 1)
-                    except (sysutil.UnexpectedEOF, BrokenPipeError):
-                        # Probably exception in parent. The parent will display the error.
-                        sysutil.fork_exit(1)
-                    os.close(w2parent)
-                    os.close(rfparent)
-                else:
-                    logging.getLogger(__name__).debug(
-                        'Inner fork: %s, child=%d, parent=%d' % (repr(self), pid2, os.getpid()))
-                    os.waitpid(pid2, 0)
-                sysutil.fork_exit(0)
-            else:
-                logging.getLogger(__name__).debug('Fork: %s, child=%d, parent=%d' % (repr(self), pid, os.getpid()))
-
-                # Initialize variables for static analysis
-                serialized = None
                 raised = False
-
+                try:
+                    result = func(*args, **kwargs)
+                except BaseException as e:
+                    traceback.print_exc()
+                    result = e
+                    raised = True
+                serialized = pickle.dumps(result)
+                header = struct.pack('=?Q', raised, len(serialized))
+                try:
+                    sysutil.write_blocking(w2parent, header)
+                    sysutil.write_blocking(w2parent, serialized)
+                    sysutil.read_blocking(rfparent, 1)
+                except (sysutil.UnexpectedEOF, BrokenPipeError):
+                    # Probably exception in parent. The parent will display the error.
+                    sysutil.fork_exit(1)
                 os.close(w2parent)
                 os.close(rfparent)
-                if not wait:
-                    os.close(w2child)
-                    os.close(rfchild)
-                    return
-                try:
-                    header = sysutil.read_blocking(rfchild, struct.calcsize('=?Q'))
-                    raised, expected_length = struct.unpack('=?Q', header)
-                    serialized = sysutil.read_blocking(rfchild, expected_length)
-                    sysutil.write_blocking(w2child, b'\0')
-                except (sysutil.UnexpectedEOF, BrokenPipeError):
-                    # Probably exception in child. The child will display the error.
-                    sysutil.fork_exit(1)
+            else:
+                logging.getLogger(__name__).debug(
+                    'Inner fork: %s, child=%d, parent=%d' % (repr(self), pid2, os.getpid()))
+                os.waitpid(pid2, 0)
+            sysutil.fork_exit(0)
+        else:
+            logging.getLogger(__name__).debug('Fork: %s, child=%d, parent=%d' % (repr(self), pid, os.getpid()))
+
+            # Initialize variables for static analysis
+            serialized = None
+            raised = False
+
+            os.close(w2parent)
+            os.close(rfparent)
+            if not wait:
                 os.close(w2child)
                 os.close(rfchild)
-                try:
-                    os.waitpid(pid, 0)
-                except OSError:
-                    pass
-                if not isolated:
-                    # Unpickling should be safe even in the case of a privilege drop because it causes the dumpable
-                    # attribute of a process to be set to 0. This ensures the integrity of the function code that is
-                    # executed inside the child. In particular, an unprivileged process cannot tamper with its
-                    # integrity and modify the pickled object sent to the parent. See `man 2 prctl`
-                    # (PR_SET_DUMPABLE). See also `man 2 ptrace` (Ptrace access mode checking). Also see `man 5 proc`.
+                return
+            try:
+                header = sysutil.read_blocking(rfchild, struct.calcsize('=?Q'))
+                raised, expected_length = struct.unpack('=?Q', header)
+                serialized = sysutil.read_blocking(rfchild, expected_length)
+                sysutil.write_blocking(w2child, b'\0')
+            except (sysutil.UnexpectedEOF, BrokenPipeError):
+                # Probably exception in child. The child will display the error.
+                sysutil.fork_exit(1)
+            os.close(w2child)
+            os.close(rfchild)
+            try:
+                os.waitpid(pid, 0)
+            except OSError:
+                pass
+            if not isolated:
+                # Unpickling should be safe even in the case of a privilege drop because it causes the dumpable
+                # attribute of a process to be set to 0. This ensures the integrity of the function code that is
+                # executed inside the child. In particular, an unprivileged process cannot tamper with its
+                # integrity and modify the pickled object sent to the parent. See `man 2 prctl`
+                # (PR_SET_DUMPABLE). See also `man 2 ptrace` (Ptrace access mode checking). Also see `man 5 proc`.
 
-                    result = pickle.loads(serialized)
-                    if raised:
-                        raise result
-                    return result
+                result = pickle.loads(serialized)
+                if raised:
+                    raise result
+                return result
 
     def mount_etc(self):
         if not os.path.isdir(self.etc_path):
@@ -236,7 +238,7 @@ class NetworkNamespace:
             except FileNotFoundError:
                 pass
 
-    def _join_ns(self, tp):
+    def _join_ns(self, tp, stack=None):
         ns_map = {
             sysutil.CLONE_NEWUSER: 'user',
             sysutil.CLONE_NEWNET: 'net',
@@ -245,78 +247,53 @@ class NetworkNamespace:
             sysutil.CLONE_NEWIPC: 'ipc',
             sysutil.CLONE_NEWUTS: 'uts',
         }
+
+        if stack is not None:
+            stack[tp] = os.open('/proc/self/ns/' + ns_map[tp], os.O_RDONLY)
+
         if self.pid is not None:
             proc_path = '/proc/%d/ns/' % self.pid
         else:
             proc_path = self.fd_path
 
         fd = os.open(os.path.join(proc_path, ns_map[tp]), os.O_RDONLY)
-        sysutil.setns(fd, tp)
-        os.close(fd)
-        pass
+        try:
+            sysutil.setns(fd, tp)
+        finally:
+            os.close(fd)
 
     def enter(self, overlay_fs=True, exclude_ns=0):
-        self.fd_stack.append((
-            os.open('/proc/self/ns/net', os.O_RDONLY),
-            os.open('/proc/self/ns/mnt', os.O_RDONLY),
-            *([] if security.is_sudo_or_root() else (os.open('/proc/self/ns/user', os.O_RDONLY),)),
-        ))
+        old_cwd = os.getcwd()
 
-        if security.is_sudo_or_root():
-            fd = os.open(os.path.join(self._run_path, 'net'), os.O_RDONLY)
-            sysutil.setns(fd, sysutil.CLONE_NEWNET)
-            os.close(fd)
-            sysutil.mount(b'', b'/', b'none', sysutil.MS_SLAVE | sysutil.MS_REC, None)
+        stack = {}
 
-            sysutil.unshare(sysutil.CLONE_NEWNS)
-            sysutil.umount2(b'/sys', sysutil.MNT_DETACH)
-            sysutil.mount(self.fd_path.encode(), b'/sys', b'sysfs', 0, None)
+        if (exclude_ns & sysutil.CLONE_NEWUSER) == 0 and not security.is_sudo_or_root():
+            self._join_ns(sysutil.CLONE_NEWUSER, stack)
+        if (exclude_ns & sysutil.CLONE_NEWNET) == 0:
+            self._join_ns(sysutil.CLONE_NEWNET, stack)
+        if (exclude_ns & sysutil.CLONE_NEWPID) == 0:
+            self._join_ns(sysutil.CLONE_NEWPID, stack)
+        if (exclude_ns & sysutil.CLONE_NEWIPC) == 0:
+            self._join_ns(sysutil.CLONE_NEWIPC, stack)
+        if (exclude_ns & sysutil.CLONE_NEWUTS) == 0:
+            self._join_ns(sysutil.CLONE_NEWUTS, stack)
 
-            for mount in self.mounts:
-                mount.mount()
+        # Mount namespace must be last
+        if (exclude_ns & sysutil.CLONE_NEWNS) == 0:
+            self._join_ns(sysutil.CLONE_NEWNS, stack)
 
-            if overlay_fs:
-                self.fs = OverlayMount('/etc', self.etc_path)
-                self.fs.start()
-            else:
-                self.mount_etc()
-        else:
-            old_cwd = os.getcwd()
+        self.fd_stack.append(stack)
 
-            if (exclude_ns & sysutil.CLONE_NEWUSER) == 0:
-                self._join_ns(sysutil.CLONE_NEWUSER)
-            if (exclude_ns & sysutil.CLONE_NEWNET) == 0:
-                self._join_ns(sysutil.CLONE_NEWNET)
-            if (exclude_ns & sysutil.CLONE_NEWPID) == 0:
-                self._join_ns(sysutil.CLONE_NEWPID)
-            if (exclude_ns & sysutil.CLONE_NEWIPC) == 0:
-                self._join_ns(sysutil.CLONE_NEWIPC)
-            if (exclude_ns & sysutil.CLONE_NEWUTS) == 0:
-                self._join_ns(sysutil.CLONE_NEWUTS)
-
-            # Mount namespace must be last
-            if (exclude_ns & sysutil.CLONE_NEWNS) == 0:
-                self._join_ns(sysutil.CLONE_NEWNS)
-
-            try:
-                os.chdir(old_cwd)
-            except FileNotFoundError:
-                pass
+        try:
+            os.chdir(old_cwd)
+        except FileNotFoundError:
+            pass
 
     def exit(self):
         cwd = os.getcwd()
-        fds = self.fd_stack.pop()
-        netns_fd, mnt_fd = fds[0:2]
 
-        if not security.is_sudo_or_root():
-            sysutil.setns(fds[2], sysutil.CLONE_NEWUSER)
-            os.close(fds[2])
-
-        sysutil.setns(netns_fd, sysutil.CLONE_NEWNET)
-        os.close(netns_fd)
-
-        sysutil.setns(mnt_fd, sysutil.CLONE_NEWNS)
-        os.close(mnt_fd)
+        for tp, fd in self.fd_stack.pop():
+            sysutil.setns(fd, tp)
 
         os.chdir(cwd)
 
@@ -353,14 +330,18 @@ class NetworkNamespace:
             os.close(read)
             self._nodefault()
 
-            if not security.is_sudo_or_root():
-                real_user = security.real_user()
-                real_group = security.real_group()
+            real_user = security.real_user()
+            real_group = security.real_group()
 
+            if not security.is_sudo_or_root():
                 sandbox.map_user(real_user, real_group)
-                sysutil.unshare(sysutil.CLONE_NEWNS)
-                self.fs = OverlayMount('/etc', self.etc_path)
-                self.fs.start()
+            sysutil.unshare(sysutil.CLONE_NEWNS)
+
+            # Do not propagate up.
+            sysutil.mount(b'', b'/', b'none', sysutil.MS_SLAVE | sysutil.MS_REC, None)
+
+            self.fs = OverlayMount('/etc', self.etc_path)
+            self.fs.start()
 
             sysutil.unshare(sysutil.CLONE_NEWNET)
             sysutil.unshare(sysutil.CLONE_NEWPID)
@@ -373,12 +354,11 @@ class NetworkNamespace:
                 os.setpgid(0, 0)
                 # This is the init process inside our PID namespace (PID 1).
                 # When it is killed, all other processes inside the namespace are killed as well.
-                if not security.is_sudo_or_root():
-                    sysutil.mount(b'proc', b'/proc', b'proc', 0, None)
+                sysutil.mount(b'proc', b'/proc', b'proc', 0, None)
 
-                    # Prevent zombie processes
-                    signal.signal(signal.SIGCHLD, signal.SIG_IGN)
-                    sysutil.prctl(sysutil.PR_SET_CHILD_SUBREAPER, 1)
+                # Prevent zombie processes
+                signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+                sysutil.prctl(sysutil.PR_SET_CHILD_SUBREAPER, 1)
 
                 # This is a dirty hack. Mounts at / do not become effective unless rejoining the mount namespace.
                 # Therefore, we signal changed root mounts through SIGUSR1.

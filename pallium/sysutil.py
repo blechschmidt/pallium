@@ -7,6 +7,7 @@ import select
 import signal
 import socket
 import struct
+import typing
 from typing import Optional, Union, List
 from . import onexit
 from . import security
@@ -74,13 +75,14 @@ CAP_PERFMON = 1 << 38
 CAP_BPF = 1 << 39
 CAP_CHECKPOINT_RESTORE = 1 << 40
 
-LINUX_CAPABILITY_VERSION_2 = 0x20071026
 LINUX_CAPABILITY_VERSION_3 = 0x20080522
 
 IFNAMSIZ = 16
 
 SIOCSIFNAME = 0x8923
 
+SYSCALL_CAPGET = 125
+SYSCALL_CAPSET = 126
 
 class UserCapHeader(ctypes.Structure):
     _fields_ = [
@@ -106,26 +108,63 @@ _libc.prctl.argtypes = (ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_u
 _pivot_root = ctypes.CDLL(None).syscall
 _pivot_root.restype = ctypes.c_int
 _pivot_root.argtypes = ctypes.c_char_p, ctypes.c_char_p
+
+# Reference: https://elixir.bootlin.com/linux/latest/A/ident/capset
 _capset = ctypes.CDLL(None).syscall
 _capset.restype = ctypes.c_int
-_capset.argtypes = ctypes.c_long, ctypes.POINTER(UserCapHeader), ctypes.POINTER(UserCapData)
+_capset.argtypes = ctypes.c_long, ctypes.POINTER(UserCapHeader), ctypes.POINTER(UserCapData * 2)
+
+# Reference: https://elixir.bootlin.com/linux/latest/A/ident/capget
+_capget = ctypes.CDLL(None).syscall
+_capget.restype = ctypes.c_int
+_capget.argtypes = ctypes.c_long, ctypes.POINTER(UserCapHeader), ctypes.POINTER(UserCapData * 2)
 
 
 def capset(effective=0, permitted=0, inheritable=0, pid=0):
-    """if pid is None:
-        pid = os.getpid()"""
-    header = UserCapHeader()
-    header.version = LINUX_CAPABILITY_VERSION_3
-    header.pid = pid
+    header = UserCapHeader(version=LINUX_CAPABILITY_VERSION_3, pid=pid)
 
-    data = UserCapData()
-    data.effective = effective
-    data.permitted = permitted
-    data.inheritable = inheritable
-    ret = _capset(126, header, data)
+    data = (UserCapData * 2)()
+
+    # First struct contains low bits (irrespective of endianness)
+    data[0].effective = effective & 0xffffffff
+    data[0].permitted = permitted & 0xffffffff
+    data[0].inheritable = inheritable & 0xffffffff
+
+    # Second struct contains high bits (irrespective of endianness)
+    data[1].effective = (effective >> 32) & 0xffffffff
+    data[1].permitted = (permitted >> 32) & 0xffffffff
+    data[1].inheritable = (inheritable >> 32) & 0xffffffff
+
+    ret = _capset(SYSCALL_CAPSET, header, data)
     if ret < 0:
-        errno = ctypes.get_errno()
+        errno = -ret
         raise OSError(errno, 'Capset error: {}'.format(os.strerror(errno)))
+
+
+def bitmask_to_str_capset(mask) -> typing.Set[str]:
+    caps = set()
+    cap_var_names = [x for x in globals().keys() if x.startswith('CAP_')]
+    for var in cap_var_names:
+        if mask & globals()[var] != 0:
+            caps.add(var)
+    return caps
+
+
+def capget(pid=0):
+    header = UserCapHeader(version=LINUX_CAPABILITY_VERSION_3, pid=pid)
+    data = (UserCapData * 2)()
+
+    ret = _capget(SYSCALL_CAPGET, ctypes.byref(header), ctypes.byref(data))
+
+    if ret != 0:
+        errno = -ret
+        raise OSError(errno, os.strerror(errno))
+
+    effective = (data[0].effective | (data[1].effective << 32))
+    permitted = (data[0].permitted | (data[1].permitted << 32))
+    inheritable = (data[0].inheritable | (data[1].inheritable << 32))
+
+    return effective, permitted, inheritable
 
 
 class ReadWriteError(Exception):
@@ -276,9 +315,6 @@ def drop_privileges(user: Union[int, str], change_home: bool = False, group: Uni
                     temporary: bool = False) -> None:
     pw_entry = get_pw_entry(user)
 
-    if not security.is_sudo_or_root():
-        raise Exception("Dropping privileges is disallowed")
-
     if not temporary:
         os.setgroups(os.getgrouplist(pw_entry.pw_name, pw_entry.pw_gid))
 
@@ -301,9 +337,13 @@ def get_real_user():
 def privilege_drop_preexec(user: Union[int, str], change_home: bool = False, group: Union[int, str, None] = None,
                            temporary: bool = False, no_new_privs: bool = False):
     def f():
-        drop_privileges(user, change_home, group, temporary)
-        if no_new_privs:
-            prctl(PR_SET_NO_NEW_PRIVS, 1)
+        try:
+            drop_privileges(user, change_home, group, temporary)
+            if no_new_privs:
+                prctl(PR_SET_NO_NEW_PRIVS, 1)
+        except:
+            import traceback
+            traceback.print_exc()
     env = dict(os.environ)
     if change_home:
         pw_entry = get_pw_entry(user)

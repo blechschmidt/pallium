@@ -29,7 +29,7 @@ def get_tcp_connections():
             yield local, remote
 
 
-def wait_for_listener(addr, timeout: float = 30):
+def wait_for_listener(addr, timeout: float = 30, exception_function=None):
     start_time = time.perf_counter()
     end_time = start_time + timeout if timeout is not None else None
     addr = ipaddress.ip_address(addr[0]), addr[1]
@@ -44,6 +44,9 @@ def wait_for_listener(addr, timeout: float = 30):
             return False
         time.sleep(0.1)
 
+        if exception_function is not None:
+            exception_function()
+
 
 class SocksAppHop(hop.Hop):
     def __init__(self, user: str, cmd=None, timeout: float = 30, **kwargs):
@@ -51,8 +54,6 @@ class SocksAppHop(hop.Hop):
         self._tun2socks = None
         self._socks_endpoint = None
         self._user = user
-        if self._user is None:
-            self._user = security.real_user()
         self._timeout = timeout
         self.cmd = cmd
         self._proc_pid = None
@@ -83,14 +84,21 @@ class SocksAppHop(hop.Hop):
         # kwargs = {'preexec_fn': netns.map_back_real}
         kwargs = {}
 
-        if security.is_sudo_or_root():
+        if security.is_sudo_or_root() and self._user is not None:
             kwargs = sysutil.privilege_drop_preexec(self._user, True)
 
         process = self.popen(self.cmd, **kwargs)
         self._proc_pid = process.pid
         # Wait for the SOCKS listener to appear
         self.log_debug('Waiting for SSH socks endpoint to appear at %s.' % str(self._socks_endpoint))
-        if not wait_for_listener(self._socks_endpoint):
+
+        def ssh_error():
+            returncode = process.poll()
+            if returncode is not None and returncode != 0:
+                # TODO: Include SSH output in exception.
+                raise ConnectionError('SSH exited with code %d' % returncode)
+
+        if not wait_for_listener(self._socks_endpoint, exception_function=ssh_error):
             raise TimeoutError
 
     def next_hop(self) -> Optional[hop.Hop]:

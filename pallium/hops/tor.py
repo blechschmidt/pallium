@@ -1,5 +1,6 @@
 import ipaddress
 import os
+import pwd
 import shutil
 import time
 from typing import Optional, List
@@ -57,7 +58,7 @@ class TorHop(hop.Hop):
         self._circuit_build_timeout = circuit_build_timeout
         self._builtin_dns = builtin_dns
         if user is None:
-            user = security.real_user()
+            user = security.least_privileged_user()
         self._user = user
         self._onion_support = onion_support
         self.required_routes = [ipaddress.ip_network('0.0.0.0/0'), ipaddress.ip_network('::/0')]
@@ -97,7 +98,7 @@ class TorHop(hop.Hop):
         command += ['--Log', 'notice stderr']
         kwargs = {'env': os.environ.copy()}
 
-        if security.is_sudo_or_root():
+        if security.is_sudo_or_root() and self._user is not None:
             kwargs = sysutil.privilege_drop_preexec(self._user)
 
         tor_env = self.get_tool_env('tor')

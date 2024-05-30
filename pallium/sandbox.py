@@ -533,7 +533,7 @@ class Sandbox:
             else:
                 logging.error('Working directory "%s" is not a directory' % self.working_dir)
 
-        if self.gvisor is False and not root:
+        if self.gvisor is False and not root and not security.is_sudo_or_root():
             map_back_real()
 
         # We support disabling user namespaces to reduce the attack surface of the kernel inside the sandbox.
@@ -635,7 +635,7 @@ class Sandbox:
         use_gvisor = self.gvisor is not False and ns_index == -1
 
         profile = session.profile
-        if security.is_sudo_or_root():
+        if profile.user:
             call_args.update(sysutil.privilege_drop_preexec(profile.user, True))
         else:
             def preexec_fn():
@@ -674,10 +674,12 @@ class Sandbox:
                 call_args['pass_fds'] = [runsc_fd, gvisor_config_dir_fd, gvisor_init_fd]
                 call_args['shell'] = False
 
+                # If we have real root privileges, we do not make use of user namespaces,
+                # while the root variable indicates that we want to use fakeroot (i.e. a 0-mapped UID in the namespace)
                 map_user_args = [
                     '--uid-map', '%d 0 1' % security.RUID,
                     '--gid-map', '%d 0 1' % security.RGID
-                ] if not root else []
+                ] if not root and not security.is_sudo_or_root() else []
 
                 controlling_terminal = [
                     '--controlling-terminal'
@@ -698,6 +700,8 @@ class Sandbox:
                 argv_orig[0] = shutil.which(argv_orig[0])
                 argv_run += argv_orig
 
+                effective, permitted, inheritable = tuple(map(sysutil.bitmask_to_str_capset, sysutil.capget()))
+
                 spec = {
                     "root": {
                         "path": "/"
@@ -707,6 +711,12 @@ class Sandbox:
                         "cwd": self.working_dir,
                         "args": argv_run,
                         "terminal": terminal,
+                        "capabilities": {
+                            "effective": list(effective),
+                            "permitted": list(effective),
+                            "inheritable": list(effective),
+                            "bounding": list(effective),
+                        }
                     },
                     "hostname": self.hostname
                 }
@@ -722,8 +732,7 @@ class Sandbox:
                         traceback.print_exc()
                         sys.exit(1)
 
-                call_args.update(dict(
-                    preexec_fn=preexec))
+                call_args.update({'preexec_fn': preexec})
 
                 if terminal:
                     # Ignore all signals that we can ignore
@@ -745,7 +754,7 @@ class Sandbox:
                         '--network=host',
                         # '--debug', '--debug-log', '/tmp/gvisor-debug.txt',
                         '--file-access=shared',
-                        '--rootless',
+                        *(['--rootless'] if not security.is_sudo_or_root() else []),
                         '--host-uds=all',
                         '--root=' + gvisor_config_dir,
                         '--overlay2=none',
@@ -772,6 +781,7 @@ class Sandbox:
             except:
                 traceback.print_exc()
                 sys.exit(1)
+        # TODO: Fix
         os.kill(session.sandbox_pid, signal.SIGUSR1)
         ns.run(run, new_session=False)
 
