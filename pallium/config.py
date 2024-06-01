@@ -2,6 +2,7 @@
 import dataclasses
 import ipaddress
 import os
+import types
 
 import typing
 
@@ -22,9 +23,20 @@ def json_serializable(cls: typing.Type[_T]) -> typing.Type[_T]:
     def json_value_to_instance(value, tp=None):
         assert tp is not None, "Implementation requires type hinting."
 
-        if typing.get_origin(tp) == typing.Optional \
-                or typing.get_origin(tp) == typing.Union and len(typing.get_args(tp)) == 2 \
-                and type(None) in set(typing.get_args(tp)):
+        if tp == types.NoneType:
+            if value is not None:
+                raise ConfigurationError('Expected None')
+            return None
+
+        if typing.get_origin(tp) == typing.Union:
+            for t in typing.get_args(tp):
+                try:
+                    return json_value_to_instance(value, t)
+                except ConfigurationError:
+                    pass
+            raise ConfigurationError('No type in Union matched')
+
+        if typing.get_origin(tp) == typing.Optional:
             if value is None:
                 return None
             # Unpack optional type
@@ -52,6 +64,13 @@ def json_serializable(cls: typing.Type[_T]) -> typing.Type[_T]:
         return from_json(tp, value)
 
     def from_json(cls, json_data: typing.Dict[str, typing.Any]) -> _T:
+        """
+        This is the method to be added to the class to deserialize it from JSON.
+
+        @param cls: The class wrapped by the decorator.
+        @param json_data: The JSON data to deserialize.
+        @return: The deserialized instance.
+        """
         constructor = {}
         for key, value in json_data.items():
             if key not in cls.__annotations__:
@@ -172,7 +191,7 @@ def default_command():
 @json_serializable
 @dataclasses.dataclass
 class Run:
-    command: typing.Optional[typing.List[str]] = dataclasses.field(default_factory=default_command)
+    command: typing.Optional[typing.Union[typing.List[str], str]] = dataclasses.field(default_factory=default_command)
     quiet: bool = dataclasses.field(default=False)  # Whether to suppress status information of pallium and its helpers
 
 
