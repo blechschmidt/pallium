@@ -8,6 +8,8 @@ name: Build and publish executable
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build_publish:
