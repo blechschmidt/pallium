@@ -15,7 +15,7 @@ from . import config
 
 class Slirp:
     def __init__(self, configuration: config.Configuration, hop_info, quiet=False):
-        self.port_forwarding = configuration.networking.port_forwarding
+        self.port_forwarding = configuration.network.port_forwarding
         self.hop_info = hop_info
         self.quiet = quiet
 
@@ -46,7 +46,7 @@ def available_slirp_class():
 
 class Slirp4Netns(Slirp):
     def __init__(self, configuration: config.Configuration, hop_info, quiet=False):
-        if len (configuration.networking.port_forwarding.local) > 0:
+        if len (configuration.network.port_forwarding.local) > 0:
             raise NotImplementedError('Slirp4netns does not support port forwarding. Use slirpnetstack instead.')
         super().__init__(configuration, hop_info, quiet)
 

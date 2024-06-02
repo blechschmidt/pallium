@@ -97,7 +97,7 @@ class Profile:
         @param kill_switch: When enabled, traffic is not allowed to bypass hops.
         """
         self._filepath = None
-        chain = conf.networking.chain
+        chain = conf.network.chain
         if len(chain) == 0 or not isinstance(chain[-1], DummyHop):
             chain.append(DummyHop())
         self.chain = chain
@@ -106,14 +106,14 @@ class Profile:
         start_networks = []
         self.start_networks = list(map(ipaddress.ip_network, start_networks))
         self.netinfo = None
-        self.bridge = conf.networking.bridge
+        self.bridge = conf.network.bridge
         self._preexec_fn = []
         self._postexec_fn = []
         # TODO: Support
         self.user = None
         self.netpool = NetPool()
         self.command = conf.run.command
-        routes = conf.networking.routes
+        routes = conf.network.routes
         if routes is not None:
             chain[-1].required_routes = list(map(ipaddress.ip_network, routes))
 
@@ -128,7 +128,7 @@ class Profile:
             if self.debug:
                 hop.debug = True
         self._context_sessions = []
-        self.kill_switch = conf.networking.kill_switch
+        self.kill_switch = conf.network.kill_switch
         self._mounts = []
         self.has_connected_functions = False
 
@@ -803,7 +803,7 @@ class OwnedSession(Session):
         if is_first_hop:
             return
 
-        local_fwds = self.profile.config.networking.port_forwarding.local
+        local_fwds = self.profile.config.network.port_forwarding.local
 
         def local_port_forwarding_setup():
             # TODO: route_localnet for last namespace (https://serverfault.com/a/1022269).

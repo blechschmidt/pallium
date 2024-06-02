@@ -9,7 +9,7 @@ import pallium.hops.tor
 class PalliumTestCase(unittest.TestCase):
     @staticmethod
     def test_json_serializable():
-        @pallium.config.json_serializable
+        @pallium.config.json_deserializable
         @dataclasses.dataclass
         class TestClass:
             a: int
@@ -46,11 +46,11 @@ class PalliumTestCase(unittest.TestCase):
         config = pallium.config.Configuration.from_json(json)
 
         assert config.run.quiet is False
-        assert len(config.networking.chain) == 1
-        assert isinstance(config.networking.chain[0], pallium.hops.socks.SocksHop)
-        assert config.networking.chain[0].username == 'johndoe'
-        assert config.networking.chain[0].password == 'secret'
-        assert config.networking.bridge is None
+        assert len(config.network.chain) == 1
+        assert isinstance(config.network.chain[0], pallium.hops.socks.SocksHop)
+        assert config.network.chain[0].username == 'johndoe'
+        assert config.network.chain[0].password == 'secret'
+        assert config.network.bridge is None
 
 
 if __name__ == '__main__':
