@@ -44,6 +44,14 @@ curl -O -L https://github.com/blechschmidt/pallium/releases/latest/download/pall
 chmod +x pallium-x86_64-bundle-linux
 ```
 
+Pallium supports [build provenance attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
+To verify the authenticity of the binary, you can use the GitHub CLI tool:
+```shell
+gh attestation verify pallium-x86_64-bundle-linux --repo blechschmidt/pallium
+```
+
+This ensures that the binary was built by the GitHub Actions CI/CD pipeline and has not been tampered with.
+
 ### Automated Installation
 Having cloned pallium, it can be installed using the included installation script:
 
