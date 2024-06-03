@@ -45,7 +45,7 @@ chmod +x pallium-x86_64-bundle-linux
 ```
 
 Pallium supports [build provenance attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
-To verify the authenticity of the binary, you can use the GitHub CLI tool:
+To verify the authenticity of the binary, you can use the [GitHub CLI tool](https://cli.github.com/):
 ```shell
 gh attestation verify pallium-x86_64-bundle-linux --repo blechschmidt/pallium
 ```
