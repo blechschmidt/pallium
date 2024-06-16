@@ -44,8 +44,9 @@ curl -O -L https://github.com/blechschmidt/pallium/releases/latest/download/pall
 chmod +x pallium-x86_64-bundle-linux
 ```
 
-Pallium supports [build provenance attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli).
-To verify the authenticity of the binary, you can use the [GitHub CLI tool](https://cli.github.com/):
+Pallium supports [build provenance attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds#verifying-artifact-attestations-with-the-github-cli)
+since v0.1.0-alpha4.
+To verify the authenticity of the binary, you can use the [GitHub CLI](https://cli.github.com/):
 ```shell
 gh attestation verify pallium-x86_64-bundle-linux --repo blechschmidt/pallium
 ```
@@ -246,7 +247,7 @@ The `pallium mv` command works analogously to the copy command but moves files a
 
 The above demo illustrates the functionality of the `run` and `shell` commands. Inside a normal shell, we use the API of
 the Tor Project to confirm that the network traffic is currently not routed through Tor. After displaying the
-configuration file of the pallium profile called `tor`, we use the `run` command, which creates a pallium session and
+configuration file of the pallium profile called `demo`, we use the `run` command, which creates a pallium session and
 launches a shell inside. Inside the session, we use `curl` again to confirm that the traffic is now routed through Tor.
 In a second shell spawned by `tmux`, we demonstrate the use of the `shell` command, spawning a bash inside the session
 running on the left side. You can see that upon running `curl` inside the session in the right `tmux` panel, the
