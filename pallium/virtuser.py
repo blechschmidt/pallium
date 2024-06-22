@@ -24,7 +24,7 @@ class VirtualUser:
         self.skeleton = skeleton
 
     def _copy_skeleton(self):
-        if self.skeleton is None or os.path.exists(self.home):
+        if not self.skeleton or os.path.exists(self.home):
             return
         if os.path.exists(self.skeleton):
             shutil.copytree(self.skeleton, self.home)
