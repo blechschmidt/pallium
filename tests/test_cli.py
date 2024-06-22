@@ -101,8 +101,6 @@ class PalliumTestCase(unittest.TestCase):
         assert pallium_exec_output(profile, ['whoami']) == 'johndoe'
 
     def test_mv(self):
-        with tempfile.NamedTemporaryFile():
-            pass
         profile = {
             'sandbox': {
                 'virtuser': {
@@ -124,6 +122,10 @@ class PalliumTestCase(unittest.TestCase):
             subprocess.call(['pallium', 'mv', tmp.name, '--to', session.profile_path, '/home/johndoe/hello.txt'])
             exec_result = session.exec(['cat', '/home/johndoe/hello.txt'])
             assert exec_result == 'hello world'
+
+            subprocess.call(['pallium', 'mv', '/home/johndoe/hello.txt', tmp.name, '--from', session.profile_path])
+            with open(tmp.name, 'r') as f:
+                assert f.read() == 'hello world'
 
     def test_port_forwarding(self):
         profile = {
