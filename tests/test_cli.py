@@ -148,7 +148,7 @@ class PalliumTestCase(unittest.TestCase):
             sock.connect(('127.0.0.1', 1337))
             sock.sendall(b'hello world\n')
             sock.close()
-            nc.wait()
+            nc.wait(30)
             with open(tmp.name, 'r') as f:
                 assert f.read().strip() == 'hello world'
 
