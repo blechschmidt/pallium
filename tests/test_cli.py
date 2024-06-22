@@ -152,10 +152,10 @@ class PalliumTestCase(unittest.TestCase):
             sock.connect(('127.0.0.1', 1337))
             sock.sendall(b'hello world\n')
             sock.close()
-            nc.wait(30)
+            nc.wait(5)
             with open(tmp.name, 'r') as f:
                 assert f.read().strip() == 'hello world'
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(module='test_cli')
