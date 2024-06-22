@@ -155,6 +155,7 @@ class LocalPortForwarding:
         if self.protocol not in {'udp', 'tcp'}:
             raise ConfigurationError('The scheme of the port forwarding %s is not either tcp or udp' % scheme)
 
+        # TODO: Add IPv6 support.
         components = rest.split(':')
         if len(components) != 4:
             raise ConfigurationError('Port forwarding expected to have the following scheme: '

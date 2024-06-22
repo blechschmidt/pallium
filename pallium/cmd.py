@@ -12,6 +12,7 @@ import signal
 import stat
 import sys
 import glob
+import typing
 
 from . import util
 from . import runtime
@@ -84,34 +85,39 @@ def pallium_run(args):
     )
 
     terminal = is_tty(sys.stdin.fileno()) and is_tty(sys.stdout.fileno()) and is_tty(sys.stderr.fileno())
-    session.run(profile.command, terminal=terminal, call_args=call_args)
+    session.run(profile.command, terminal=terminal, call_args=call_args, pid_file=args.pid_file)
 
     global no_interrupt
     no_interrupt = True
 
 
-def parse_path(path: str, session: int):
+def parse_path(path: str, session: int, sandbox_name: typing.Optional[str] = None):
     """
     Parse an scp-style path to a usable path to copy/move from/to.
 
     @return: A full path.
     """
-    path = path.rstrip('/')
-    if ':' not in path:
-        return path
-    split = path.split(':', maxsplit=1)
-    if '/' in split[0]:  # The part before the colon is not a sandbox name.
-        return path
-    config = os.path.join(runtime.PROFILE_DIR, split[0] + '.json')
-    profile = Profile.from_file(config)
+    if sandbox_name is None:
+        path = path.rstrip('/')
+        if ':' not in path:
+            return path
+        split = path.split(':', maxsplit=1)
+        if '/' in split[0]:  # The part before the colon is not a sandbox name.
+            return path
+        config = os.path.join(runtime.PROFILE_DIR, split[0] + '.json')
+        profile = Profile.from_file(config)
+        path = split[1]
+    else:
+        profile = Profile.from_file(sandbox_name)
+        path = path
     session = profile.get_session(session)
     pid = session.sandbox_pid
-    return '/proc/%d/root' % pid + split[1]
+    return '/proc/%d/root' % pid + path
 
 
 def pallium_cp(args):
-    src_path = parse_path(args.src, args.session)
-    dst_path = parse_path(args.dst, args.session)
+    src_path = parse_path(args.src, args.session, args.from_sandbox)
+    dst_path = parse_path(args.dst, args.session, args.to)
     if os.path.isdir(dst_path):
         dst_path = os.path.join(dst_path, os.path.basename(src_path))
     if args.recursive:
@@ -121,8 +127,8 @@ def pallium_cp(args):
 
 
 def pallium_mv(args):
-    src_path = parse_path(args.src, args.session)
-    dst_path = parse_path(args.dst, args.session)
+    src_path = parse_path(args.src, args.session, args.from_sandbox)
+    dst_path = parse_path(args.dst, args.session, args.to)
     shutil.move(src_path, dst_path)
 
 
@@ -226,7 +232,7 @@ def pallium_exec(args):
 
     terminal = is_tty(sys.stdin.fileno()) and is_tty(sys.stdout.fileno()) and is_tty(sys.stderr.fileno())
     sys.exit(session.run(command, terminal=terminal, ns_index=args.namespace, root=args.root,
-                         call_args=call_args))
+                         call_args=call_args, pid_file=args.pid_file))
 
 
 def parser_add_config(parser, add=True):
@@ -298,6 +304,7 @@ def main(args=None):
     parser_run = main_cmd_parser.add_parser('run', help='Run a profile.')
     parser_add_quiet(parser_run)
     parser_run.add_argument('--new-session', action='store_true', help='Create a new session if there is one already.')
+    parser_run.add_argument('--pid-file', type=str, help='Write the PID of the session to a file.')
     parser_add_config(parser_run)
 
     parser_shell = main_cmd_parser.add_parser('shell', help='Open the default shell inside a running session.')
@@ -306,6 +313,7 @@ def main(args=None):
     parser_shell.add_argument('--one-shot', action='store_true', help='Create a new session for this shell.')
     parser_shell.add_argument('-r', '--root', action='store_true', help='Run as root.')
     parser_shell.add_argument('--namespace', type=int, default=-1, help='Namespace index.')
+    parser_shell.add_argument('--pid-file', type=str, help='Write the PID of the session to a file.')
 
     parser_stop = main_cmd_parser.add_parser('stop', help='Stop a running session.')
     parser_session_selector(parser_stop)
@@ -317,16 +325,21 @@ def main(args=None):
     parser_add_root(parser_exec)
     parser_exec.add_argument('command', nargs=argparse.REMAINDER)
     parser_exec.add_argument('--namespace', type=int, default=-1, help='Namespace index.')
+    parser_exec.add_argument('--pid-file', type=str, help='Write the PID of the session to a file.')
 
     parser_cp = main_cmd_parser.add_parser('cp', help='Copy a file or directory from or to a sandbox.')
     parser_cp.add_argument('src', help='Source path.')
     parser_cp.add_argument('dst', help='Destination path.')
     parser_cp.add_argument('-r', '--recursive', help='Copy directories recursively.', action='store_true')
+    parser_cp.add_argument('--from', help='Source sandbox.', dest='from_sandbox')  # from is a reserved keyword
+    parser_cp.add_argument('--to', help='Destination sandbox.')
     parser_add_session(parser_cp)
 
     parser_mv = main_cmd_parser.add_parser('mv', help='Move a file or directory from or to a sandbox.')
     parser_mv.add_argument('src', help='Source path.')
     parser_mv.add_argument('dst', help='Destination path.')
+    parser_mv.add_argument('--from', help='Source sandbox.', dest='from_sandbox')  # from is a reserved keyword
+    parser_mv.add_argument('--to', help='Destination sandbox.')
     parser_add_session(parser_mv)
 
     main_cmd_parser.add_parser('list', help='List profiles.')

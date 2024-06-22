@@ -113,10 +113,14 @@ Persistence in this case means that pallium will automatically create a user hom
 The following profile starts [transmission-gtk](https://transmissionbt.com/) and routes its traffic through OpenVPN.
 ```json
 {
-  "chain": [{
-    "type": "openvpn",
-    "config": "/home/you/openvpn.ovpn"
-  }],
+  "network": {
+    "chain": [
+      {
+        "type": "openvpn",
+        "config": "/home/you/openvpn.ovpn"
+      }
+    ]
+  },
   "run": {
     "command": "transmission-gtk"
   }
@@ -132,12 +136,16 @@ Therefore, it is placed in `/etc/pallium/profiles` instead of `~/.config/pallium
 as root.
 ```json
 {
-  "chain": [{
-    "type": "tor"
-  }],
-  "bridge": {
-    "name": "torbr",
-    "dhcp": true
+  "network": {
+    "chain": [
+      {
+        "type": "tor"
+      }
+    ],
+    "bridge": {
+      "name": "torbr",
+      "dhcp": true
+    }
   }
 }
 ```

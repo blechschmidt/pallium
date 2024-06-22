@@ -152,21 +152,23 @@ The configuration file of the above example could look like this:
     "gui": true,
     "audio": true
   },
-  "chain": [
-    {
-      "type": "socks",
-      "address": "10.8.0.3:1080",
-      "username": "jane.doe",
-      "password": "pass1234"
-    },
-    {
-      "type": "tor"
-    },
-    {
-      "type": "openvpn",
-      "config": "/path/to/conf.ovpn"
-    }
-  ],
+  "network":{
+    "chain": [
+      {
+        "type": "socks",
+        "address": "10.8.0.3:1080",
+        "username": "jane.doe",
+        "password": "pass1234"
+      },
+      {
+        "type": "tor"
+      },
+      {
+        "type": "openvpn",
+        "config": "/path/to/conf.ovpn"
+      }
+    ]
+  },
   "run": {
     "command": "firefox"
   }

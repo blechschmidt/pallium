@@ -1229,15 +1229,8 @@ class OwnedSession(Session):
         return NetworkNamespace(fd_path, etc_path, pid_path=pid_path)
 
     def run(self, *args, **kwargs):
-        if self.profile.sandbox is not None:
-            return self.profile.sandbox.run(self, *args, **kwargs)
-        else:
-            call_args = {}
-            if self.profile.user is not None:
-                call_args = sysutil.privilege_drop_preexec(self.profile.user, True)
-            call_args.update(kwargs.get('call_args', {}))
-            ns = self.network_namespaces[-1]
-            ns.run(lambda: subprocess.call(self.profile.command, **call_args))
+        assert self.profile.sandbox is not None
+        return self.profile.sandbox.run(self, *args, **kwargs)
 
     def close(self):
         """

@@ -621,7 +621,7 @@ class Sandbox:
                    hostname=obj.get('hostname', 'pallium'),
                    gvisor=gvisor)
 
-    def run(self, session, argv, ns_index=-1, root=False, call_args=None, terminal=False):
+    def run(self, session, argv, ns_index=-1, root=False, call_args=None, terminal=False, pid_file=None):
         # TODO: Make this a parameter
         execute = False
         if isinstance(argv, str):
@@ -781,8 +781,12 @@ class Sandbox:
             except:
                 traceback.print_exc()
                 sys.exit(1)
-        # TODO: Fix
+        # Signal that the sandbox has been set up.
+        # TODO: This is racey.
         os.kill(session.sandbox_pid, signal.SIGUSR1)
+        if pid_file is not None:
+            with open(pid_file, 'w') as f:
+                f.write(str(session.sandbox_pid) + '\n')
         ns.run(run, new_session=False)
 
 
