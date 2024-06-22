@@ -101,6 +101,8 @@ class PalliumTestCase(unittest.TestCase):
         assert pallium_exec_output(profile, ['whoami']) == 'johndoe'
 
     def test_mv(self):
+        with tempfile.NamedTemporaryFile():
+            pass
         profile = {
             'sandbox': {
                 'virtuser': {
