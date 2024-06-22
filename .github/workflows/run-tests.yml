@@ -43,6 +43,9 @@ jobs:
         env:
           DOTENV: ${{ secrets.DOTENV }}
         run: echo "$DOTENV" > tests/.env
+      - name: Run CLI tests
+        timeout-minutes: 30
+        run: cd tests && python test_cli.py -v
       - name: Run sandbox tests
         timeout-minutes: 30
         run: cd tests && python test_sandbox.py -v
