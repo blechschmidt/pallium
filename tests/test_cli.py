@@ -92,7 +92,10 @@ class PalliumTestCase(unittest.TestCase):
     def test_virtuser(self):
         profile = {
             'sandbox': {
-                'virtuser': 'johndoe'
+                'virtuser': {
+                    'name': 'johndoe',
+                    'skeleton': False
+                }
             }
         }
         assert pallium_exec_output(profile, ['whoami']) == 'johndoe'
@@ -100,7 +103,10 @@ class PalliumTestCase(unittest.TestCase):
     def test_mv(self):
         profile = {
             'sandbox': {
-                'virtuser': 'johndoe'
+                'virtuser': {
+                    'name': 'johndoe',
+                    'skeleton': False
+                }
             },
             'run': {
                 'command': ['sleep', 'infinity']

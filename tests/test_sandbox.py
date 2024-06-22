@@ -43,7 +43,10 @@ class PalliumTestCase(unittest.TestCase):
     def test_virtuser(self):
         profile = {
             "sandbox": {
-                "virtuser": "johndoe"
+                "virtuser": {
+                    "name": "johndoe",
+                    "skeleton": False
+                }
             }
         }
         whoami_output = get_output(profile, 'whoami')
@@ -107,14 +110,6 @@ class PalliumTestCase(unittest.TestCase):
             }
 
             assert get_output(profile, ["cat", dst]) == "Hello world", "Test bind mounting test file at " % dst
-
-
-    def test_mv(self):
-        profile = {
-            "sandbox": {
-                "virtuser": "$tmp"
-            }
-        }
 
 
 if __name__ == '__main__':
