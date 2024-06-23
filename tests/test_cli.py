@@ -1,5 +1,7 @@
+import fcntl
 import json
 import os
+import select
 import socket
 import subprocess
 import tempfile
@@ -58,7 +60,7 @@ class PalliumTestSession:
         self.read_fd, write_fd = os.pipe()
         self.process = subprocess.Popen(
             ['pallium', 'run', '--pid-file', '/proc/self/fd/%d' % write_fd, '--quiet', self.profile_path],
-            pass_fds=[write_fd])
+            pass_fds=[write_fd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.wait_for_startup()
 
     def close(self):
@@ -71,7 +73,17 @@ class PalliumTestSession:
             self.tempfile = None
 
     def wait_for_startup(self):
-        os.read(self.read_fd, 1)
+        flag = fcntl.fcntl(self.read_fd, fcntl.F_GETFL)
+        fcntl.fcntl(self.read_fd, fcntl.F_SETFL, flag | os.O_NONBLOCK)
+        while True:
+            rlist, _, _ = select.select([self.read_fd], [], [], 0.3)
+            if len(rlist) > 0:
+                os.read(self.read_fd, 1)
+                break
+            exit_code = self.process.poll()
+            if exit_code is not None and exit_code != 0:
+                raise subprocess.CalledProcessError(exit_code, 'Pallium terminated with a non-zero exit code '
+                                                               'and did not write to the PID file.')
 
     def exec(self, command, stripped=True):
         return pallium_exec_profile_path(self.profile_path, command, stripped).decode()
