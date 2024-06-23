@@ -58,7 +58,7 @@ class PalliumTestSession:
         self.read_fd, write_fd = os.pipe()
         self.process = subprocess.Popen(
             ['pallium', 'run', '--pid-file', '/proc/self/fd/%d' % write_fd, '--quiet', self.profile_path],
-            pass_fds=[write_fd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            pass_fds=[write_fd])
         self.wait_for_startup()
 
     def close(self):
