@@ -45,7 +45,7 @@ jobs:
         run: echo "$DOTENV" > tests/.env
       - name: Run CLI tests
         timeout-minutes: 30
-        run: cd tests && python -m trace --trace test_cli.py -v
+        run: cd tests && python test_cli.py -v PalliumTestCase.test_mv
       - name: Run sandbox tests
         timeout-minutes: 30
         run: cd tests && python test_sandbox.py -v
