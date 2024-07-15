@@ -1,5 +1,7 @@
+import fcntl
 import json
 import os
+import select
 import socket
 import subprocess
 import tempfile
@@ -71,7 +73,17 @@ class PalliumTestSession:
             self.tempfile = None
 
     def wait_for_startup(self):
-        os.read(self.read_fd, 1)
+        flag = fcntl.fcntl(self.read_fd, fcntl.F_GETFL)
+        fcntl.fcntl(self.read_fd, fcntl.F_SETFL, flag | os.O_NONBLOCK)
+        while True:
+            rlist, _, _ = select.select([self.read_fd], [], [], 0.3)
+            if len(rlist) > 0:
+                os.read(self.read_fd, 1)
+                break
+            exit_code = self.process.poll()
+            if exit_code is not None and exit_code != 0:
+                raise Exception('Pallium terminated with a non-zero exit code (%d) '
+                                'and did not write to the PID file' % exit_code)
 
     def exec(self, command, stripped=True):
         return pallium_exec_profile_path(self.profile_path, command, stripped).decode()
@@ -123,6 +135,10 @@ class PalliumTestCase(unittest.TestCase):
             exec_result = session.exec(['cat', '/home/johndoe/hello.txt'])
             assert exec_result == 'hello world'
 
+            subprocess.call(['pallium', 'mv', '/home/johndoe/hello.txt', tmp.name, '--from', session.profile_path])
+            with open(tmp.name, 'r') as f:
+                assert f.read() == 'hello world'
+
     def test_port_forwarding(self):
         profile = {
             'network': {
@@ -148,10 +164,10 @@ class PalliumTestCase(unittest.TestCase):
             sock.connect(('127.0.0.1', 1337))
             sock.sendall(b'hello world\n')
             sock.close()
-            nc.wait(30)
+            nc.wait(5)
             with open(tmp.name, 'r') as f:
                 assert f.read().strip() == 'hello world'
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(module='test_cli')

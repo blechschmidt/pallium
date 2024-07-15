@@ -30,6 +30,7 @@ while true; do
 done
 
 contains() { case "$1" in *"$2"*) true ;; *) false ;; esac }
+
 # shellcheck disable=SC2039
 is_root() { [ "${EUID:-$(id -u)}" -eq 0 ]; }
 
@@ -256,9 +257,21 @@ install_slirp4netns() {
   test $? -eq 0 || install_pkg slirp4netns
 }
 
+install_slirpnetstack() {
+  command -v slirpnetstack >/dev/null 2>&1
+  { test $? -eq 0 || test -f /usr/local/bin/slirpnetstack; } && return
+  get_goarch
+  SUFFIX="$RESULT"
+  URL=https://github.com/tun2proxy/slirpnetstack/releases/latest/download/slirpnetstack-linux-"$SUFFIX"
+
+  ask_continue "$URL will be downloaded and extracted to /usr/local/bin/."
+  curl -L "$URL" > /usr/local/bin/slirpnetstack
+  chmod 755 /usr/local/bin/slirpnetstack
+}
+
 install_tun2socks() {
   command -v tun2socks >/dev/null 2>&1
-  { test $? -eq 0 || test -f /usr/bin/tun2socks; } && return
+  { test $? -eq 0 || test -f /usr/local/bin/tun2socks; } && return
   get_goarch
   SUFFIX="$RESULT"
   test "$SUFFIX" = "arm" && SUFFIX=armv5
@@ -273,9 +286,7 @@ install_tun2socks() {
   install_unzip
   unzip -d "$TMP" "$TMP/tun2socks.zip" tun2socks-linux-"$SUFFIX"
   install -m 0755 "$TMP/tun2socks-linux-$SUFFIX" /usr/local/bin/tun2socks
-  rm "$TMP/tun2socks.zip"
-  rm "$TMP/tun2socks-linux-$SUFFIX"
-  rmdir "$TMP"
+  rm -r "$TMP"
 }
 
 install_gvisor() {
@@ -309,6 +320,6 @@ test "$DEPENDENCIES_ONLY" = "1" || {
 test "$NO_DEPENDENCIES" != "1" && {
   install_tor
   install_tun2socks
-  install_slirp4netns
+  install_slirpnetstack
   install_gvisor
 }

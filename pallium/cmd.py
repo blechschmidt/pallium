@@ -104,12 +104,12 @@ def parse_path(path: str, session: int, sandbox_name: typing.Optional[str] = Non
         split = path.split(':', maxsplit=1)
         if '/' in split[0]:  # The part before the colon is not a sandbox name.
             return path
-        config = os.path.join(runtime.PROFILE_DIR, split[0] + '.json')
-        profile = Profile.from_file(config)
+        config_path = get_config_path(split[0])
+        profile = Profile.from_file(config_path)
         path = split[1]
     else:
-        profile = Profile.from_file(sandbox_name)
-        path = path
+        config_path = get_config_path(sandbox_name)
+        profile = Profile.from_file(config_path)
     session = profile.get_session(session)
     pid = session.sandbox_pid
     return '/proc/%d/root' % pid + path
