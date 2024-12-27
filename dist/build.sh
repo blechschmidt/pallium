@@ -70,7 +70,7 @@ install_go() {
 
 build_slirpnetstack() {
   (
-    git clone https://github.com/blechschmidt/slirpnetstack slirpnetstack-repo
+    git clone https://github.com/tun2proxy/slirpnetstack slirpnetstack-repo
     cd slirpnetstack-repo
     go build
   )

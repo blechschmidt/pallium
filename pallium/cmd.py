@@ -93,23 +93,18 @@ def pallium_run(args):
 
 def parse_path(path: str, session: int, sandbox_name: typing.Optional[str] = None):
     """
-    Parse an scp-style path to a usable path to copy/move from/to.
+    Parse path to a usable path to copy/move from/to.
+
+    @param path: The path.
+    @param session: The session index.
+    @param sandbox_name: If the sandbox name is None, the path is a host path that is returned as is.
 
     @return: A full path.
     """
     if sandbox_name is None:
-        path = path.rstrip('/')
-        if ':' not in path:
-            return path
-        split = path.split(':', maxsplit=1)
-        if '/' in split[0]:  # The part before the colon is not a sandbox name.
-            return path
-        config_path = get_config_path(split[0])
-        profile = Profile.from_file(config_path)
-        path = split[1]
-    else:
-        config_path = get_config_path(sandbox_name)
-        profile = Profile.from_file(config_path)
+        return path
+    config_path = get_config_path(sandbox_name)
+    profile = Profile.from_file(config_path)
     session = profile.get_session(session)
     pid = session.sandbox_pid
     return '/proc/%d/root' % pid + path
@@ -117,7 +112,7 @@ def parse_path(path: str, session: int, sandbox_name: typing.Optional[str] = Non
 
 def pallium_cp(args):
     src_path = parse_path(args.src, args.session, args.from_sandbox)
-    dst_path = parse_path(args.dst, args.session, args.to)
+    dst_path = parse_path(args.dst, args.session, args.to_sandbox)
     if os.path.isdir(dst_path):
         dst_path = os.path.join(dst_path, os.path.basename(src_path))
     if args.recursive:
@@ -128,7 +123,7 @@ def pallium_cp(args):
 
 def pallium_mv(args):
     src_path = parse_path(args.src, args.session, args.from_sandbox)
-    dst_path = parse_path(args.dst, args.session, args.to)
+    dst_path = parse_path(args.dst, args.session, args.to_sandbox)
     shutil.move(src_path, dst_path)
 
 
@@ -332,14 +327,14 @@ def main(args=None):
     parser_cp.add_argument('dst', help='Destination path.')
     parser_cp.add_argument('-r', '--recursive', help='Copy directories recursively.', action='store_true')
     parser_cp.add_argument('--from', help='Source sandbox.', dest='from_sandbox')  # from is a reserved keyword
-    parser_cp.add_argument('--to', help='Destination sandbox.')
+    parser_cp.add_argument('--to', help='Destination sandbox.', dest='to_sandbox')  # analogous to --from
     parser_add_session(parser_cp)
 
     parser_mv = main_cmd_parser.add_parser('mv', help='Move a file or directory from or to a sandbox.')
     parser_mv.add_argument('src', help='Source path.')
     parser_mv.add_argument('dst', help='Destination path.')
     parser_mv.add_argument('--from', help='Source sandbox.', dest='from_sandbox')  # from is a reserved keyword
-    parser_mv.add_argument('--to', help='Destination sandbox.')
+    parser_mv.add_argument('--to', help='Destination sandbox.', dest='to_sandbox')  # analogous to --from
     parser_add_session(parser_mv)
 
     main_cmd_parser.add_parser('list', help='List profiles.')

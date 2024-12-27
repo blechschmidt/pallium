@@ -2,9 +2,7 @@
 
 ## Linux Network and Security Sandbox
 
-**This project is still in an early phase of development (pre-alpha). It is not ready for production use
-and has [known issues](/doc/issues.md), which are not (yet) documented exhaustively.
-Please expect bugs and breaking changes.**
+**This project is still in an early phase of development. Please expect bugs and breaking changes.**
 
 Pallium is a Linux network and security sandbox. In contrast to many other sandboxing solutions,
 pallium can provide reasonable protection against Linux kernel exploits
@@ -48,10 +46,11 @@ Pallium supports [build provenance attestations](https://docs.github.com/en/acti
 since v0.1.0-alpha4.
 To verify the authenticity of the binary, you can use the [GitHub CLI](https://cli.github.com/):
 ```shell
-gh attestation verify pallium-x86_64-bundle-linux --repo blechschmidt/pallium
+gh attestation verify pallium-x86_64-bundle-linux --owner blechschmidt --signer-workflow blechschmidt/pallium/.github/workflows/deploy.yml
 ```
 
-This ensures that the binary was built by the GitHub Actions CI/CD pipeline and has not been tampered with.
+This ensures that the binary was built by the GitHub Actions CI/CD workflow from the code in the repository and has not
+been tampered with.
 
 ### Automated Installation
 Having cloned pallium, it can be installed using the included installation script:
@@ -75,17 +74,17 @@ This installation method does not require root, but you will need to manually in
 
 The following additional software is required depending on the hop chain and needs to be installed separately.
 
-| Feature                 | Binaries                                                          |
-|-------------------------|-------------------------------------------------------------------|
-| OpenVPN                 | openvpn                                                           |
-| SOCKS                   | [tun2socks](https://github.com/xjasonlyu/tun2socks)               |
-| Tor (SOCKS)             | tor                                                               |
-| SSH (SOCKS)             | ssh                                                               |
-| HTTP                    | [tun2socks](https://github.com/xjasonlyu/tun2socks)               |
-| DHCP (bridging)         | dnsmasq                                                           |
-| GUI isolation           | [Xpra](https://xpra.org/)                                         |
-| Unprivileged sandboxing | [slirp4netns](https://github.com/rootless-containers/slirp4netns) |
-| Kernel isolation        | [gVisor](https://github.com/google/gvisor)                        |
+| Feature                 | Binaries                                                                                                                                     |
+|-------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| OpenVPN                 | openvpn                                                                                                                                      |
+| SOCKS                   | [tun2socks](https://github.com/xjasonlyu/tun2socks)                                                                                          |
+| Tor (SOCKS)             | tor                                                                                                                                          |
+| SSH (SOCKS)             | ssh                                                                                                                                          |
+| HTTP                    | [tun2socks](https://github.com/xjasonlyu/tun2socks)                                                                                          |
+| DHCP (bridging)         | dnsmasq                                                                                                                                      |
+| GUI isolation           | [Xpra](https://xpra.org/)                                                                                                                    |
+| Unprivileged sandboxing | [slirpnetstack](https://github.com/tun2proxy/slirpnetstack) (preferred) or [slirp4netns](https://github.com/rootless-containers/slirp4netns) |
+| Kernel isolation        | [gVisor](https://github.com/google/gvisor)                                                                                                   |
 
 
 ## CLI Usage
@@ -236,8 +235,10 @@ following the profile name instead of opening a shell. The command consists of a
 `pallium stop my_profile` stops a session and terminates all programs inside the session.
 
 ### cp
-`pallium cp my_profile:/tmp/file.txt /tmp/file.txt` copies a file from within the `my_profile` sandbox to the host. The
-command supports recursive copying of directories through the `-r` flag.
+`pallium cp --from my_profile /file/in/sandbox.txt /file/on/host.txt` copies a file from within the `my_profile` sandbox
+to the host. The command supports recursive copying of directories through the `-r` flag.
+With `pallium cp --from sandbox1 /file/in/sandbox1.txt --to sandbox2 /file/in/sandbox2.txt`, a file can be
+moved between sandboxes. Without `--from` or `--to`, the respective arguments refer to paths on the host.
 
 ### mv
 The `pallium mv` command works analogously to the copy command but moves files and directories instead of copying them.

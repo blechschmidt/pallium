@@ -125,19 +125,33 @@ class PalliumTestCase(unittest.TestCase):
             }
         }
 
-        with PalliumTestSession(profile) as session, tempfile.NamedTemporaryFile() as tmp:
+        with (PalliumTestSession(profile) as session, tempfile.NamedTemporaryFile() as tmp,
+              tempfile.TemporaryDirectory() as tmpdir):
+            with open(os.path.join(tmpdir, 'hello.txt'), 'w') as f:
+                f.write('world')
+
             with open(tmp.name, 'w') as f:
                 f.write('hello world')
+
             exec_result = session.exec(['whoami'])
             assert exec_result == 'johndoe'
 
+            # Test mv command
             subprocess.call(['pallium', 'mv', tmp.name, '--to', session.profile_path, '/home/johndoe/hello.txt'])
             exec_result = session.exec(['cat', '/home/johndoe/hello.txt'])
             assert exec_result == 'hello world'
+            assert not os.path.exists(tmp.name)
 
             subprocess.call(['pallium', 'mv', '/home/johndoe/hello.txt', tmp.name, '--from', session.profile_path])
             with open(tmp.name, 'r') as f:
                 assert f.read() == 'hello world'
+
+            # Test cp -r command
+            subprocess.call(['pallium', 'cp', '-r', tmpdir, '--to', session.profile_path, '/home/johndoe/testdir'])
+            exec_result = session.exec(['cat', '/home/johndoe/testdir/hello.txt'])
+            assert exec_result == 'world'
+            assert os.path.isdir(tmpdir)
+            assert os.path.isfile(os.path.join(tmpdir, 'hello.txt'))
 
     def test_port_forwarding(self):
         profile = {
