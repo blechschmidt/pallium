@@ -1,6 +1,7 @@
 import binascii
 import ipaddress
 import os
+import select
 import signal
 import struct
 import subprocess
@@ -87,19 +88,33 @@ class SocksAppHop(hop.Hop):
         if security.is_sudo_or_root() and self._user is not None:
             kwargs = sysutil.privilege_drop_preexec(self._user, True)
 
-        process = self.popen(self.cmd, **kwargs)
+        process = self.popen(self.cmd, stderr=subprocess.PIPE, **kwargs)
         self._proc_pid = process.pid
         # Wait for the SOCKS listener to appear
         self.log_debug('Waiting for SOCKS endpoint to appear at %s.' % str(self._socks_endpoint))
 
+
+        stderr = b''
         def ssh_error():
+            nonlocal stderr
+            while True:
+                r, _, _ = select.select([ process.stderr ], [], [], 0)
+                if process.stderr in r:
+                    read = os.read(process.stderr.fileno(), 4096)
+                    stderr += read
+                    if len(read) == 0:
+                        break
+                    continue
+                break
             returncode = process.poll()
             if returncode is not None and returncode != 0:
                 # TODO: Include command output in exception.
-                raise ConnectionError('SOCKS app command exited with code %d' % returncode)
+                raise ConnectionError('SOCKS app command exited with code %d\n%s' % (returncode, stderr.decode().strip()))
 
         if not wait_for_listener(self._socks_endpoint, exception_function=ssh_error):
             raise TimeoutError
+
+        os.dup2(os.open('/dev/null', os.O_WRONLY), process.stderr.fileno())
 
     def next_hop(self) -> Optional[hop.Hop]:
         tun2socks = socks.SocksHop(self._socks_endpoint)

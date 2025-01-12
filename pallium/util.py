@@ -175,7 +175,16 @@ def get_interface_routes(ip_version, ifname):
         return [route for route in routes]
     return result
 
-def copy_routing_table(ifname, new_table, ip_version=None, original_table=254):
+def copy_routing_table(ifname, new_table, ip_version=None, source_table=254):
+    """
+    Copy the routes of an interface to a another routing table.
+    Used for policy-based routing.
+
+    @param ifname: The name of the interface.
+    @param new_table: The new routing table number.
+    @param ip_version: The IP version to filter for. If None, both IP versions are copied.
+    @param source_table: The source routing table number.
+    """
     if ip_version is None:
         copy_routing_table(ifname, new_table, 4)
         copy_routing_table(ifname, new_table, 6)
@@ -183,7 +192,7 @@ def copy_routing_table(ifname, new_table, ip_version=None, original_table=254):
 
     family = socket.AF_INET if ip_version == 4 else socket.AF_INET6
     with IPRoute() as ip:
-        routes = ip.route('dump', family=family, oif=ip.link_lookup(ifname=ifname), table=original_table)
+        routes = ip.route('dump', family=family, oif=ip.link_lookup(ifname=ifname), table=source_table)
         for route in routes:
             route = dict(route)
             attrs = dict(route.get('attrs'))
