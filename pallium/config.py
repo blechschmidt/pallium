@@ -218,6 +218,7 @@ class Network:
     bridge: typing.Optional[Bridge] = dataclasses.field(default=None)
     routes: typing.Optional[typing.List[str]] = dataclasses.field(default=None)
     kill_switch: bool = dataclasses.field(default=True)
+    outbound_interface: typing.Optional[str] = dataclasses.field(default=None)
 
 
 def _allow_direct_chain_specification(obj):

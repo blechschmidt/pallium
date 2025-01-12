@@ -496,6 +496,11 @@ def create_filter_chain(nft, chain_name, hook, policy=0):
     nft.chain('add', table='pallium', name=chain_name, type='filter', hook=hook, priority=0, policy=policy)
 
 
+def create_prerouting_fwmark_chain(nft, chain_name):
+    nft.table('add', name='pallium')
+    nft.chain('add', table='pallium', name=chain_name, type='filter', hook='prerouting', priority=0, policy=0)
+
+
 def masquerade_interface_networks(iface, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
                                   chain_name='POSTROUTING',
                                   device=None):
@@ -510,6 +515,19 @@ def masquerade_interface_networks(iface, netinfo: Union[ipaddress.IPv4Network, i
         if device is not None:
             exp += nftables.oifname(device)
         nft.rule('add', table='pallium', chain=chain_name, expressions=(exp,))
+
+
+def mark_packets(fwmark, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
+                                  chain_name='POSTROUTING',
+                                  device=None):
+    with NFTables(nfgen_family=NFPROTO_INET) as nft:
+        create_postrouting_nat_chain(nft, chain_name)
+        exp = nftables.ip(saddr=netinfo)
+        if device is not None:
+            exp += nftables.oifname(device)
+        exp += nftables.meta.mark(fwmark)
+        nft.rule('add', table='pallium', chain=chain_name, expressions=(exp,))
+
 
 
 def drop_input(chain_name, device):
@@ -920,6 +938,7 @@ class OwnedSession(Session):
             return
 
         nft_postrouting_nat_chain = 'pallium.' + hop_info.outdev + '.nat.postrouting'
+        nft_prerouting_fwmark_chain = 'pallium.' + hop_info.outdev + '.nat.prerouting'
         nft_filter_prefix = 'pallium.' + hop_info.outdev + '.filter'
 
         # We call the revert function before building the bridge to free the resources even when create_bridge
@@ -928,6 +947,7 @@ class OwnedSession(Session):
             @self._revert  # Netns deletion implies deletion of rules/links. Manually delete them for the default netns.
             def revert_first_hop():
                 delete_chain(nft_postrouting_nat_chain)
+                delete_chain(nft_prerouting_fwmark_chain)
                 delete_link(hop_info.outdev)
 
         outfd, infd = create_bridge(hop_info.outdev, hop_info.indev, hop_info.previous.netns, hop_info.netns,
@@ -936,6 +956,9 @@ class OwnedSession(Session):
         def add_nft_rules():
             for netinfo in hop_info.netinfo:
                 masquerade_interface_networks(outfd, netinfo, nft_postrouting_nat_chain, hop_info.outdev)
+
+            if self.profile.config.network.outbound_interface is not None:
+                mark_packets(util.FWMARK_DEFAULT, netinfo, nft_prerouting_fwmark_chain, hop_info.outdev)
 
             # if not is_first_hop and self.profile.kill_switch and hop_info.previous.hop.kill_switch_device is not None:
             self._setup_filter_rule(nft_filter_prefix, hop_info)
@@ -1040,6 +1063,7 @@ class OwnedSession(Session):
                         nftables.meta.oifname(bridge_name_in),
                         nftables.snat(to=net.network_address + 2)
                     ))
+
             for route in routes:
                 with NFTables(nfgen_family=NFPROTO_INET) as nft:
                     nft.table('add', name='pallium')
