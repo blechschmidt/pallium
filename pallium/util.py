@@ -167,6 +167,41 @@ def route_get_dst(route):
     return network
 
 
+def get_interface_routes(ip_version, ifname):
+    family = socket.AF_INET if ip_version == 4 else socket.AF_INET6
+    result = []
+    with IPRoute() as ip:
+        routes = ip.route('dump', family=family, oif=ip.link_lookup(ifname=ifname))
+        return [route for route in routes]
+    return result
+
+def copy_routing_table(ifname, new_table, ip_version=None, original_table=254):
+    if ip_version is None:
+        copy_routing_table(ifname, new_table, 4)
+        copy_routing_table(ifname, new_table, 6)
+        return
+
+    family = socket.AF_INET if ip_version == 4 else socket.AF_INET6
+    with IPRoute() as ip:
+        routes = ip.route('dump', family=family, oif=ip.link_lookup(ifname=ifname), table=original_table)
+        for route in routes:
+            route = dict(route)
+            attrs = dict(route.get('attrs'))
+            if 'RTA_TABLE' in attrs:
+                del attrs['RTA_TABLE']
+            if 'FRA_TABLE' in attrs:
+                del attrs['FRA_TABLE']
+            if 'event' in route:
+                del route['event']
+            if 'header' in route:
+                del route['header']
+            for key, value in attrs.items():
+                if key.startswith('RTA_'):
+                    route[key[4:].lower()] = value
+            route['table'] = new_table
+            ip.route('add', **route)
+
+
 def get_routes(ip_version, nonglobal_only=False):
     """
     Get the installed routes as a list of IPNetworks
@@ -379,7 +414,7 @@ def is_iterable(obj: Iterable):
 
 
 def convert2addr(obj, default_port: Union[int, None] = None) -> \
-        (Union[ipaddress.IPv4Address, ipaddress.IPv6Address], int):
+        tuple[Union[ipaddress.IPv4Address, ipaddress.IPv6Address], int]:
     """Convert a string, tuple or list IP endpoint representation to an (ip_address, port) tuple"""
     if (isinstance(obj, tuple) or isinstance(obj, list)) and len(obj) == 2:
         if isinstance(obj[0], str):

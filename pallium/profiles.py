@@ -498,7 +498,7 @@ def create_filter_chain(nft, chain_name, hook, policy=0):
 
 def create_prerouting_fwmark_chain(nft, chain_name):
     nft.table('add', name='pallium')
-    nft.chain('add', table='pallium', name=chain_name, type='filter', hook='prerouting', priority=0, policy=0)
+    nft.chain('add', table='pallium', name=chain_name, type='filter', hook='prerouting', priority=0, policy=1)
 
 
 def masquerade_interface_networks(iface, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Network],
@@ -521,11 +521,11 @@ def mark_packets(fwmark, netinfo: Union[ipaddress.IPv4Network, ipaddress.IPv6Net
                                   chain_name='POSTROUTING',
                                   device=None):
     with NFTables(nfgen_family=NFPROTO_INET) as nft:
-        create_postrouting_nat_chain(nft, chain_name)
+        create_prerouting_fwmark_chain(nft, chain_name)
         exp = nftables.ip(saddr=netinfo)
         if device is not None:
-            exp += nftables.oifname(device)
-        exp += nftables.meta.mark(fwmark)
+            exp += nftables.iifname(device)
+        exp += nftables.meta.mark(set=fwmark)
         nft.rule('add', table='pallium', chain=chain_name, expressions=(exp,))
 
 
@@ -953,12 +953,26 @@ class OwnedSession(Session):
         outfd, infd = create_bridge(hop_info.outdev, hop_info.indev, hop_info.previous.netns, hop_info.netns,
                                     debug=self.profile.debug)
 
+        fwmark_routing = self.profile.config.network.outbound_interface is not None and is_first_hop
+        if fwmark_routing:
+            @self._revert
+            def revert_fwmark_routing():
+                with IPRoute() as ip:
+                    ip.rule('del', fwmark=util.FWMARK_DEFAULT, table=util.ROUTING_TABLE_DEFAULT, family=socket.AF_INET)
+                    ip.rule('del', fwmark=util.FWMARK_DEFAULT, table=util.ROUTING_TABLE_DEFAULT, family=socket.AF_INET6)
+                    ip.flush_routes(table=util.ROUTING_TABLE_DEFAULT)
+
         def add_nft_rules():
             for netinfo in hop_info.netinfo:
                 masquerade_interface_networks(outfd, netinfo, nft_postrouting_nat_chain, hop_info.outdev)
 
-            if self.profile.config.network.outbound_interface is not None:
-                mark_packets(util.FWMARK_DEFAULT, netinfo, nft_prerouting_fwmark_chain, hop_info.outdev)
+            if fwmark_routing:
+                with IPRoute() as ip:
+                    ip.rule('add', fwmark=util.FWMARK_DEFAULT, table=util.ROUTING_TABLE_DEFAULT, family=socket.AF_INET)
+                    ip.rule('add', fwmark=util.FWMARK_DEFAULT, table=util.ROUTING_TABLE_DEFAULT, family=socket.AF_INET6)
+                util.copy_routing_table(self.profile.config.network.outbound_interface, util.ROUTING_TABLE_DEFAULT)
+                for netinfo in hop_info.netinfo:
+                    mark_packets(util.FWMARK_DEFAULT, netinfo, nft_prerouting_fwmark_chain, hop_info.outdev)
 
             # if not is_first_hop and self.profile.kill_switch and hop_info.previous.hop.kill_switch_device is not None:
             self._setup_filter_rule(nft_filter_prefix, hop_info)
