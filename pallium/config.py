@@ -1,9 +1,7 @@
-# Not in use yet
 import copy
 import dataclasses
 import ipaddress
 import os
-import shutil
 import types
 
 import typing
@@ -219,6 +217,7 @@ class Network:
     routes: typing.Optional[typing.List[str]] = dataclasses.field(default=None)
     kill_switch: bool = dataclasses.field(default=True)
     outbound_interface: typing.Optional[str] = dataclasses.field(default=None)
+    force_slirp: bool = dataclasses.field(default=False)
 
 
 def _allow_direct_chain_specification(obj):

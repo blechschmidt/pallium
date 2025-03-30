@@ -48,13 +48,14 @@ class HopInfo:
     """
     def __init__(self, netinfo: List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]],
                  network_namespace: Optional[NetworkNamespace], indev, outdev,
-                 hop, previous=None):
+                 hop, previous=None, use_slirp=False):
         self.netinfo: List[Union[ipaddress.IPv4Network, ipaddress.IPv6Network]] = netinfo
         self.netns: Optional[NetworkNamespace] = network_namespace
         self.indev: str = indev
         self.outdev: str = outdev
         self.previous: HopInfo = previous
         self.hop: Hop = hop
+        self.use_slirp: bool = use_slirp
 
     @property
     def index(self) -> int:
@@ -344,14 +345,14 @@ class Hop:
         return []
 
     @staticmethod
-    def add_required_routes(hop_info):
+    def add_required_routes(hop_info: HopInfo):
         """This method is run inside the connect function and adds the required routes.
 
         @param hop_info: Runtime information of the hop.
         @return: None.
         """
         # Slirp4netns adds the IPv4 default route automatically. It does not add an IPv6 route though.
-        if runtime.use_slirp4netns() and hop_info.previous.previous is None:
+        if hop_info.use_slirp and hop_info.previous.previous is None:
             if runtime.ip_proto_supported_default(6):
                 with IPRoute() as ip:
                     infd = ip.link_lookup(ifname=hop_info.indev)[0]

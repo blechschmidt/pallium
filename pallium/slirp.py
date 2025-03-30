@@ -106,9 +106,10 @@ class SlirpNetstack(Slirp):
 
         def preexec_fn():
             try:
-                # Slirpnetstack does not automatically join the destination
-                # user namespace. So we need to do it ourselves.
-                netns.join_namespace(sysutil.CLONE_NEWUSER, hop_info.netns.pid)
+                if os.getuid() != 0:
+                    # Slirpnetstack does not automatically join the destination
+                    # user namespace. So we need to do it ourselves.
+                    netns.join_namespace(sysutil.CLONE_NEWUSER, hop_info.netns.pid)
             except:
                 traceback.print_exc()
                 raise

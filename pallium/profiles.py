@@ -446,7 +446,7 @@ def disable_checksum_offloading(ifname) -> None:
     ethtool.close()
 
 
-def create_bridge(peer1_name: str, peer2_name: str, peer1_netns: NetworkNamespace, peer2_netns: NetworkNamespace,
+def create_bridge(peer1_name: str, peer2_name: str, peer1_netns: NetworkNamespace, peer2_netns: NetworkNamespace, use_slirp: bool,
                   debug=False):
     def run():
         with IPRoute() as ip:
@@ -459,7 +459,7 @@ def create_bridge(peer1_name: str, peer2_name: str, peer1_netns: NetworkNamespac
 
             peer1_fd = ip.link_lookup(ifname=peer1_name)[0]
             peer2_fd = ip.link_lookup(ifname=peer2_name)[0]
-            if not peer1_netns.is_default and not runtime.use_slirp4netns():
+            if not peer1_netns.is_default and not use_slirp:
                 kwargs = {'net_ns_pid': peer1_netns.pid}
             else:
                 kwargs = {}
@@ -469,7 +469,7 @@ def create_bridge(peer1_name: str, peer2_name: str, peer1_netns: NetworkNamespac
 
         return peer1_fd, peer2_fd
 
-    if not runtime.use_slirp4netns():
+    if not use_slirp:
         result = run()
     else:
         result = peer1_netns.run(run, exclude_ns=sysutil.CLONE_NEWPID | sysutil.CLONE_NEWNS)
@@ -816,7 +816,7 @@ class OwnedSession(Session):
     # TODO: Only do this if we have a port forwarding to localhost
     def finalize_setup(self, hop_info, is_last):
         is_first_hop = hop_info.previous.previous is None
-        if not runtime.use_slirp4netns():
+        if not self._use_slirp:
             return
         if is_first_hop:
             return
@@ -911,7 +911,7 @@ class OwnedSession(Session):
 
     def _setup_namespace(self, hop_info):
         is_first_hop = hop_info.previous.previous is None
-        if not runtime.use_slirp4netns() or is_first_hop:
+        if not self._use_slirp or is_first_hop:
             hop_info.netns.create()
         else:
             def create_nested():
@@ -929,7 +929,7 @@ class OwnedSession(Session):
             except ProcessLookupError:
                 return
 
-        if runtime.use_slirp4netns() and is_first_hop:
+        if self._use_slirp and is_first_hop:
             slirp_app = slirp.available_slirp_class()(self.profile.config, hop_info, self.profile.quiet)
 
             hop_info.netns.run(slirp_app.prepare)
@@ -950,7 +950,7 @@ class OwnedSession(Session):
                 delete_chain(nft_prerouting_fwmark_chain)
                 delete_link(hop_info.outdev)
 
-        outfd, infd = create_bridge(hop_info.outdev, hop_info.indev, hop_info.previous.netns, hop_info.netns,
+        outfd, infd = create_bridge(hop_info.outdev, hop_info.indev, hop_info.previous.netns, hop_info.netns, use_slirp=self._use_slirp,
                                     debug=self.profile.debug)
 
         fwmark_routing = self.profile.config.network.outbound_interface is not None and is_first_hop
@@ -1007,7 +1007,7 @@ class OwnedSession(Session):
         bridge_name_in = self._bridge.name if self._bridge.name is not None else self.iface_id(2 * chain_length + 1)
         bridge_name_out = self.iface_id(2 * chain_length)
 
-        infd, outfd = create_bridge(bridge_name_in, bridge_name_out, NetworkNamespace.default, hop_info.netns,
+        infd, outfd = create_bridge(bridge_name_in, bridge_name_out, NetworkNamespace.default, hop_info.netns, use_slirp=self._use_slirp,
                                     debug=self.profile.debug)
 
         def run_in_hop_netns():
@@ -1160,6 +1160,10 @@ class OwnedSession(Session):
             }))
         os.chmod(state_file, 0o600)
 
+    @property
+    def _use_slirp(self):
+        return self.profile.config.network.force_slirp or runtime.use_slirp4netns()
+
     def _connect(self):
         """
         Build the network connection chain.
@@ -1168,7 +1172,7 @@ class OwnedSession(Session):
         """
         self._first_ns = NetworkNamespace.identify()
 
-        if runtime.use_slirp4netns():
+        if self._use_slirp:
             dummy = DummyHop()
             dummy.dns_servers = hops.hop.DnsOverlay()
             dummy.providing_routes = runtime.DEFAULT_DESTINATIONS.copy()
@@ -1176,7 +1180,7 @@ class OwnedSession(Session):
         else:
             self._enable_ip_forwarding(allow_interfaces=[self.iface_id(0)])
 
-        previous_hop_info = hops.HopInfo([], self._first_ns, self.iface_id(0), None, None)
+        previous_hop_info = hops.HopInfo([], self._first_ns, self.iface_id(0), None, None, use_slirp=self._use_slirp)
         self._effective_chain = chain = self._profile.chain.copy()
         self._forwarding_exceptions = []
         hop_index = 0
@@ -1189,7 +1193,7 @@ class OwnedSession(Session):
 
             outdev = self.iface_id(2 * hop_index)
             indev = self.iface_id(2 * hop_index + 1)
-            hop_info = hops.HopInfo(self._current_network, network_namespace, indev, outdev, hop, previous_hop_info)
+            hop_info = hops.HopInfo(self._current_network, network_namespace, indev, outdev, hop, previous_hop_info, use_slirp=self._use_slirp)
             hop.info = hop_info
 
             if hop.info.previous.hop is not None and isinstance(hop_info.previous.hop.dns_servers, hops.hop.DnsOverlay):
